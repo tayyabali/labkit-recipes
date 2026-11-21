@@ -1,0 +1,3157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b7a75">
+  <meta name="description" content="Make lab solutions correctly: scale a recipe, weigh with live feedback, and keep a record. Works offline; your data stays on your device.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <title>LabKit Recipes</title>
+  <style>
+/* LabKit Recipes: mobile first. Base styles are for a phone; wider screens only add. */
+:root {
+  --bg: #f3f6f7;
+  --card: #ffffff;
+  --text: #17222b;
+  --muted: #5a6978;
+  --border: #d6dde3;
+  --accent: #0b7a75;
+  --accent-text: #ffffff;
+  --accent-soft: #e0f2f0;
+  --ok: #1b7f4b;
+  --ok-soft: #e2f5ea;
+  --warn: #8a5a00;
+  --warn-soft: #fff3d6;
+  --bad: #b3261e;
+  --bad-soft: #fdeceb;
+  --shadow: 0 1px 2px rgba(15, 30, 40, 0.08), 0 4px 14px rgba(15, 30, 40, 0.06);
+  --tab-h: 62px;
+  --bar-h: 56px;
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+:root[data-theme="dark"] {
+  --bg: #0f1519; --card: #182026; --text: #e7edf1; --muted: #9bacb9; --border: #2c3944;
+  --accent: #3cc4bb; --accent-text: #08201e; --accent-soft: #14312f;
+  --ok: #5fd195; --ok-soft: #12301f; --warn: #f2c25c; --warn-soft: #3a2f14; --bad: #ff8d84; --bad-soft: #3b1d1b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overscroll-behavior-y: none; }
+h1, h2, h3 { line-height: 1.2; margin: 0 0 8px; }
+h1 { font-size: 1.45rem; } h2 { font-size: 1.15rem; } h3 { font-size: 1rem; }
+p { margin: 0 0 10px; }
+a { color: var(--accent); }
+.muted { color: var(--muted); }
+.small { font-size: 0.85rem; }
+.hidden { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+/* ----- app shell: top bar, scrolling view, bottom tabs ----- */
+#shell { min-height: 100dvh; display: flex; flex-direction: column; max-width: 760px; margin: 0 auto; background: var(--bg); }
+.appbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 4px; min-height: calc(var(--bar-h) + var(--safe-t)); padding: var(--safe-t) 8px 0; background: var(--accent); color: var(--accent-text); }
+.appbar h1 { flex: 1; margin: 0; font-size: 1.1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.appbar .icon-btn { color: var(--accent-text); }
+main#view { flex: 1; padding: 14px 14px calc(var(--tab-h) + var(--safe-b) + 90px); outline: none; }
+.tabbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; z-index: 25; width: 100%; max-width: 760px; display: grid; grid-template-columns: repeat(5, 1fr); background: var(--card); border-top: 1px solid var(--border); padding-bottom: var(--safe-b); box-shadow: 0 -2px 10px rgba(15, 30, 40, 0.06); }
+.tabbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: var(--tab-h); padding: 6px 2px; color: var(--muted); text-decoration: none; font-size: 0.72rem; font-weight: 600; }
+.tabbar a[aria-current="page"] { color: var(--accent); }
+.tabbar a[aria-current="page"] svg { stroke-width: 2.5; }
+
+/* ----- controls: all at least 44px tall for thumbs ----- */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: 12px; background: transparent; color: inherit; cursor: pointer; }
+.icon-btn:active { background: rgba(127, 127, 127, 0.18); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.btn:active { transform: scale(0.98); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.danger { color: var(--bad); }
+.btn.danger-solid { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.small { min-height: 40px; padding: 6px 12px; font-size: 0.9rem; }
+.btn.wide { width: 100%; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row-stack { display: grid; gap: 10px; margin-top: 12px; }
+input, select, textarea { font: inherit; font-size: 16px; /* 16px stops iPhones zooming in */ color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; min-height: 48px; width: 100%; min-width: 0; }
+textarea { min-height: 110px; resize: vertical; }
+input[type="checkbox"], input[type="radio"] { width: 22px; height: 22px; min-height: 0; accent-color: var(--accent); }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.field-label { font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.hint { font-size: 0.8rem; color: var(--muted); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.with-unit { display: grid; grid-template-columns: 1fr 96px; gap: 8px; }
+
+/* ----- cards, lists, badges ----- */
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 14px; margin-bottom: 12px; box-shadow: var(--shadow); }
+.list { display: grid; gap: 10px; }
+.item { display: block; text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 14px; box-shadow: var(--shadow); }
+.item:active { background: var(--accent-soft); }
+.item .title { font-weight: 700; font-size: 1.02rem; }
+.item .sub { color: var(--muted); font-size: 0.88rem; margin-top: 2px; }
+.badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 0.76rem; font-weight: 600; background: var(--accent-soft); color: var(--text); border: 1px solid var(--border); }
+.badge.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.badge.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.badge.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.note { margin: 8px 0; padding: 10px 12px; border-radius: 12px; background: var(--warn-soft); color: var(--warn); font-size: 0.9rem; }
+.note.bad { background: var(--bad-soft); color: var(--bad); }
+.note.info { background: var(--accent-soft); color: var(--text); }
+.search { position: sticky; top: calc(var(--bar-h) + var(--safe-t)); z-index: 5; padding: 8px 0; background: var(--bg); }
+.fab { position: fixed; right: max(16px, calc(50% - 364px)); bottom: calc(var(--tab-h) + var(--safe-b) + 16px); z-index: 24; display: flex; align-items: center; justify-content: center; width: 58px; height: 58px; border-radius: 50%; background: var(--accent); color: var(--accent-text); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); text-decoration: none; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px; }
+.chip { min-height: 44px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.stepper { display: grid; grid-template-columns: 52px 1fr 52px; gap: 8px; align-items: center; margin-bottom: 6px; }
+.stepper input { text-align: center; font-size: 1.3rem; font-weight: 700; }
+.stepper button { height: 52px; }
+
+/* ----- ingredient amounts (the numbers people read at the bench) ----- */
+.amounts { display: grid; gap: 8px; }
+.amt { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+.amt.warn { border-color: var(--warn); background: var(--warn-soft); }
+.amt .name { font-weight: 600; }
+.amt .conc { color: var(--muted); font-size: 0.82rem; }
+.amt .num { font-size: 1.35rem; font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.amt .tools { display: flex; gap: 6px; margin-top: 4px; }
+
+/* ----- sticky action bar above the tabs ----- */
+.actionbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tab-h) + var(--safe-b)); z-index: 22; width: 100%; max-width: 760px; display: flex; gap: 10px; padding: 10px 14px; background: linear-gradient(to top, var(--bg) 70%, transparent); }
+.actionbar .btn { flex: 1; }
+
+/* ----- sheets (bottom dialogs) ----- */
+dialog.sheet { margin: auto auto 0; width: 100%; max-width: 760px; max-height: 88dvh; padding: 0; border: 0; border-radius: 22px 22px 0 0; background: var(--card); color: var(--text); box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.3); overflow: auto; }
+dialog.sheet::backdrop { background: rgba(8, 16, 22, 0.55); }
+.sheet-head { position: sticky; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 8px 18px; background: var(--card); border-bottom: 1px solid var(--border); }
+.sheet-head h2 { margin: 0; }
+.sheet-body { padding: 14px 18px calc(18px + var(--safe-b)); }
+
+/* ----- toasts ----- */
+#toasts { position: fixed; left: 12px; right: 12px; bottom: calc(var(--tab-h) + var(--safe-b) + 84px); z-index: 60; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 12px; max-width: 520px; padding: 12px 16px; border-radius: 14px; background: #1f2b33; color: #fff; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3); }
+.toast.error { background: var(--bad); }
+.toast-action { border: 0; background: transparent; color: #8be6dc; font: inherit; font-weight: 700; min-height: 36px; padding: 0 6px; cursor: pointer; }
+
+/* ----- Bench Mode: full-screen, big type, gloves-friendly ----- */
+body.bench-mode .tabbar { display: none; }
+body.bench-mode main#view { padding-bottom: 150px; }
+.bench-dots { display: flex; gap: 6px; justify-content: center; margin: 4px 0 14px; }
+.bench-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--border); }
+.bench-dots i.done { background: var(--accent); }
+.bench-dots i.now { background: var(--accent); transform: scale(1.5); }
+.bench-name { font-size: 1.5rem; font-weight: 800; text-align: center; }
+.bench-sub { text-align: center; color: var(--muted); margin-bottom: 14px; }
+.bench-target { text-align: center; padding: 18px 8px; margin: 10px 0; border-radius: 20px; background: var(--accent-soft); border: 2px solid var(--accent); }
+.bench-target .big { font-size: 3rem; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.bench-target .range { color: var(--muted); font-size: 0.95rem; margin-top: 4px; }
+.bench-input { display: grid; grid-template-columns: 1fr 100px; gap: 8px; margin: 12px 0; }
+.bench-input input { font-size: 2rem; font-weight: 800; text-align: center; min-height: 64px; }
+.bench-input select { font-size: 1.1rem; min-height: 64px; }
+.feedback { text-align: center; padding: 14px; border-radius: 16px; font-weight: 700; font-size: 1.05rem; margin: 8px 0; background: var(--card); border: 1px solid var(--border); }
+.feedback.perfect, .feedback.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+.feedback.near { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.feedback.off { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.feedback small { display: block; font-weight: 500; opacity: 0.9; }
+.option { display: block; width: 100%; text-align: left; padding: 14px; margin-bottom: 10px; border: 2px solid var(--border); border-radius: 16px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+.option:active { border-color: var(--accent); background: var(--accent-soft); }
+.option b { display: block; font-size: 1.05rem; }
+.option span { color: var(--muted); font-size: 0.88rem; }
+.checklist label { display: flex; gap: 12px; align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--border); font-size: 1.02rem; }
+.checklist label.done span { text-decoration: line-through; color: var(--muted); }
+table.plain { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+table.plain th, table.plain td { padding: 8px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+table.plain th { color: var(--muted); font-weight: 600; }
+table.plain td.num, table.plain th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.scroll-x { overflow-x: auto; }
+
+/* ----- labels (also what gets printed) ----- */
+.label-card { width: 100%; max-width: 330px; border: 2px solid #111; border-radius: 6px; padding: 8px 10px; background: #fff; color: #000; font-size: 12px; line-height: 1.3; }
+.label-card b.n { display: block; font-size: 15px; }
+.label-card .big { font-size: 13px; font-weight: 700; }
+.glossary dt { font-weight: 700; margin-top: 12px; }
+.glossary dd { margin: 2px 0 0; color: var(--muted); }
+.hero { padding: 6px 0 4px; }
+.welcome { background: linear-gradient(135deg, var(--accent-soft), var(--card)); border-color: var(--accent); }
+
+/* ----- a little more room on tablets and desktops ----- */
+@media (min-width: 700px) {
+  main#view { padding-left: 24px; padding-right: 24px; }
+  .amounts { grid-template-columns: 1fr 1fr; }
+  .bench-target .big { font-size: 3.6rem; }
+}
+
+/* ----- printing: only the sheet or label ----- */
+@media print {
+  :root, :root[data-theme="dark"] { --bg: #fff; --card: #fff; --text: #000; --border: #888; }
+  body { background: #fff; }
+  .appbar, .tabbar, .actionbar, .fab, #toasts, .no-print { display: none !important; }
+  main#view { padding: 0; }
+  .card, .item { box-shadow: none; }
+  body.print-label .print-sheet-only { display: none !important; }
+  body.print-sheet .print-label-only { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+</style>
+</head>
+<body>
+  <div id="shell">
+    <header class="appbar" id="appbar"></header>
+    <main id="view" tabindex="-1"><p class="muted">Loading…</p></main>
+    <nav id="tabbar" class="tabbar" aria-label="Main"></nav>
+  </div>
+  <div id="toasts" aria-live="polite"></div>
+  <noscript><p style="padding:16px">LabKit Recipes needs JavaScript. Please turn it on in your browser.</p></noscript>
+  <script>
+const __m_js_ui_js = (() => {
+
+// Small DOM helpers. All text goes through text nodes, never innerHTML.
+
+// Browsers print the word "null" if null is passed to append(). Skip null, undefined and false everywhere, and flatten arrays.
+for (const method of ['append', 'prepend', 'replaceChildren']) {
+  const original = Element.prototype[method];
+  Element.prototype[method] = function (...nodes) {
+    return original.apply(this, nodes.flat(Infinity).filter((n) => n !== null && n !== undefined && n !== false));
+  };
+}
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  let value;
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'value') value = v;
+    else if (k === 'checked' || k === 'disabled' || k === 'selected' || k === 'required' || k === 'open') el[k] = !!v;
+    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : String(v));
+  }
+  append(el, kids);
+  if (value !== undefined) el.value = value;
+  return el;
+}
+
+function append(el, kids) {
+  for (const k of kids.flat(Infinity)) {
+    if (k === null || k === undefined || k === false) continue;
+    el.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  }
+  return el;
+}
+
+function clear(el) {
+  while (el.firstChild) el.removeChild(el.firstChild);
+  return el;
+}
+
+// ---------- icons (simple outline paths on a 24x24 grid) ----------
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const ICONS = {
+  recipes: 'M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z M8 8h7 M8 12h7',
+  quick: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  batches: 'M9 4h6v3H9z M7 5H5v16h14V5h-2 M9 14l2 2 4-4',
+  library: 'M9 3h6 M10 3v6L4.5 19a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3',
+  more: 'M4 7h16 M4 12h16 M4 17h16',
+  plus: 'M12 5v14 M5 12h14',
+  minus: 'M5 12h14',
+  back: 'M15 5l-7 7 7 7',
+  close: 'M6 6l12 12 M18 6 6 18',
+  share: 'M12 3v12 M7 8l5-5 5 5 M5 14v6h14v-6',
+  print: 'M7 8V3h10v5 M7 17H4v-7h16v7h-3 M7 14h10v7H7z',
+  check: 'M5 13l4 4L19 7',
+  trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13',
+  edit: 'M4 20h4L19 9l-4-4L4 16z',
+  history: 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 8v5l3 2',
+  copy: 'M9 9h11v11H9z M5 15H4V4h11v1',
+  flask: 'M9 3h6 M10 3v6L4.5 19a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3 M8 15h8',
+  play: 'M7 4l13 8-13 8z',
+  warn: 'M12 3 2 20h20z M12 10v5 M12 18v.5',
+  download: 'M12 3v12 M7 10l5 5 5-5 M5 20h14',
+  upload: 'M12 15V3 M7 8l5-5 5 5 M5 20h14',
+};
+function icon(name, size = 22) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('width', String(size));
+  svg.setAttribute('height', String(size));
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const p = document.createElementNS(SVG_NS, 'path');
+  p.setAttribute('d', ICONS[name] || ICONS.flask);
+  svg.append(p);
+  return svg;
+}
+
+// ---------- toasts ----------
+function toast(message, { action, onAction, kind = '', ms } = {}) {
+  const box = document.getElementById('toasts');
+  const t = h('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status' }, h('span', null, message));
+  if (action) t.append(h('button', { type: 'button', class: 'toast-action', onclick: () => { onAction && onAction(); t.remove(); } }, action));
+  box.append(t);
+  setTimeout(() => t.remove(), ms || (action ? 6500 : kind === 'error' ? 6000 : 3000));
+}
+
+// ---------- bottom sheets ----------
+function openSheet({ title, body, onClose }) {
+  const dlg = h('dialog', { class: 'sheet', 'aria-label': title });
+  const close = () => { if (dlg.open) dlg.close(); };
+  dlg.append(h('div', { class: 'sheet-head' }, h('h2', null, title), h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Close', onclick: close }, icon('close'))), h('div', { class: 'sheet-body' }, body));
+  dlg.addEventListener('close', () => { dlg.remove(); onClose && onClose(); });
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) close(); }); // tap outside
+  document.body.append(dlg);
+  if (typeof dlg.showModal === 'function') dlg.showModal();
+  else dlg.setAttribute('open', '');
+  return { close, el: dlg };
+}
+
+function confirmSheet({ title, message, confirmLabel = 'Confirm', danger = false }) {
+  return new Promise((resolve) => {
+    let answered = false;
+    const done = (v) => { answered = true; sheet.close(); resolve(v); };
+    const sheet = openSheet({
+      title,
+      body: h('div', null, h('p', null, message), h('div', { class: 'row-stack' },
+        h('button', { type: 'button', class: `btn ${danger ? 'danger-solid' : 'primary'}`, onclick: () => done(true) }, confirmLabel),
+        h('button', { type: 'button', class: 'btn', onclick: () => done(false) }, 'Cancel'))),
+      onClose: () => { if (!answered) resolve(false); },
+    });
+  });
+}
+
+// ---------- forms ----------
+function numOf(el) {
+  const v = el.value.trim().replace(',', '.');
+  if (v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+function field(label, control, hint) {
+  return h('label', { class: 'field' }, h('span', { class: 'field-label' }, label), control, hint ? h('span', { class: 'hint' }, hint) : null);
+}
+const numInput = (attrs = {}) => h('input', { type: 'text', inputmode: 'decimal', autocomplete: 'off', ...attrs });
+function selectEl(options, value, attrs = {}) {
+  return h('select', { value, ...attrs }, options.map((o) => (typeof o === 'string' ? h('option', { value: o }, o) : h('option', { value: o.value }, o.label))));
+}
+
+// ---------- files and sharing ----------
+function download(filename, text, mime = 'application/json') {
+  const url = URL.createObjectURL(new Blob([text], { type: `${mime};charset=utf-8` }));
+  const a = h('a', { href: url, download: filename });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+// Uses the phone's share sheet when there is one, otherwise copies to the clipboard.
+async function shareOrCopy({ title, text }) {
+  try {
+    if (navigator.share) {
+      await navigator.share({ title, text });
+      return 'shared';
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'cancelled';
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    return 'copied';
+  } catch {
+    const ta = h('textarea', { style: 'position:fixed;opacity:0' }, text);
+    document.body.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { /* ignore */ }
+    ta.remove();
+    return ok ? 'copied' : 'failed';
+  }
+}
+
+const haptic = (ms = 10) => { try { navigator.vibrate && navigator.vibrate(ms); } catch { /* not supported */ } };
+
+// ---------- dates ----------
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso.length === 10 ? iso + 'T00:00:00' : iso);
+  return Number.isNaN(d.getTime()) ? '' : `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const t = new Date(dateStr + 'T00:00:00').getTime();
+  const n = new Date();
+  n.setHours(0, 0, 0, 0);
+  return Math.round((t - n.getTime()) / 86400000);
+}
+function expiryBadge(dateStr) {
+  const d = daysUntil(dateStr);
+  if (d === null) return null;
+  if (d < 0) return h('span', { class: 'badge bad' }, `Expired ${fmtDate(dateStr)}`);
+  if (d <= 14) return h('span', { class: 'badge warn' }, `Expires in ${d} day${d === 1 ? '' : 's'}`);
+  return h('span', { class: 'badge' }, `Expires ${fmtDate(dateStr)}`);
+}
+
+return { h, append, clear, icon, toast, openSheet, confirmSheet, numOf, field, numInput, selectEl, download, shareOrCopy, haptic, fmtDate, daysUntil, expiryBadge };
+})();
+const __m_js_calc_js = (() => {
+
+// Pure calculation logic shared by the browser and the server (no DOM, no I/O).
+// Base units everywhere: concentration mol/L, volume L, mass g.
+
+const CONC = { M: 1, mM: 1e-3, 'µM': 1e-6, nM: 1e-9 };
+const VOL = { L: 1, mL: 1e-3, 'µL': 1e-6 };
+const MASS = { g: 1, mg: 1e-3, 'µg': 1e-6 };
+const LENGTH = { cm: 1, mm: 0.1 };
+
+// Units usable in recipe ingredients.
+const MASS_VOL_GL = { '% w/v': 10, 'g/L': 1, 'mg/mL': 1, 'µg/mL': 1e-3 };
+const RECIPE_UNITS = ['M', 'mM', 'µM', 'nM', '% w/v', '% v/v', 'g/L', 'mg/mL', 'µg/mL'];
+
+// Common buffers: pKa at 25 °C (approximate; Tris/HEPES shift with temperature).
+const BUFFERS = [
+  { name: 'Tris (pKa 8.07)', pKa: 8.07, acid: 'Tris-HCl', base: 'Tris base' },
+  { name: 'Phosphate (pKa2 7.20)', pKa: 7.2, acid: 'NaH2PO4', base: 'Na2HPO4' },
+  { name: 'HEPES (pKa 7.48)', pKa: 7.48, acid: 'HEPES (acid)', base: 'HEPES-Na' },
+  { name: 'MOPS (pKa 7.14)', pKa: 7.14, acid: 'MOPS (acid)', base: 'MOPS-Na' },
+  { name: 'MES (pKa 6.10)', pKa: 6.1, acid: 'MES (acid)', base: 'MES-Na' },
+  { name: 'Acetate (pKa 4.76)', pKa: 4.76, acid: 'Acetic acid', base: 'Sodium acetate' },
+  { name: 'Citrate (pKa2 4.76)', pKa: 4.76, acid: 'Citric acid form', base: 'Citrate form' },
+  { name: 'Glycine (pKa2 9.60)', pKa: 9.6, acid: 'Glycine-HCl', base: 'Glycine-Na' },
+  { name: 'Custom', pKa: null, acid: 'Acid form', base: 'Base form' },
+];
+
+const countBlank = (values) => values.filter((v) => v === null).length;
+
+// ---------- solution prep ----------
+// mass = conc * vol * mw; leave exactly one of conc/vol/mass null.
+function molarity({ mw, conc, vol, mass }) {
+  if (!(mw > 0)) return { error: 'Enter a molecular weight greater than 0.' };
+  if (countBlank([conc, vol, mass]) !== 1)
+    return { error: 'Leave exactly one of concentration, volume, or mass blank.' };
+  if ([conc, vol, mass].some((v) => v !== null && !(v > 0))) return { error: 'Values must be greater than 0.' };
+  if (mass === null) return { field: 'mass', value: conc * vol * mw };
+  if (conc === null) return { field: 'conc', value: mass / (mw * vol) };
+  return { field: 'vol', value: mass / (mw * conc) };
+}
+
+// Volume (L) of a neat liquid reagent that contains `massG` of the pure compound.
+function liquidVolume(massG, density, purityPct) {
+  if (!(density > 0)) return null;
+  const purity = purityPct > 0 ? purityPct : 100;
+  return massG / (density * (purity / 100)) / 1000;
+}
+
+// Molarity of the neat liquid reagent itself (e.g. 37% HCl is about 12 M).
+function neatMolarity(mw, density, purityPct) {
+  if (!(mw > 0) || !(density > 0)) return null;
+  const purity = purityPct > 0 ? purityPct : 100;
+  return (density * 1000 * (purity / 100)) / mw;
+}
+
+// ---------- dilution ----------
+function dilution({ c1, v1, c2, v2 }) {
+  const all = [c1, v1, c2, v2];
+  if (countBlank(all) !== 1) return { error: 'Leave exactly one of the four values blank.' };
+  if (all.some((v) => v !== null && !(v > 0))) return { error: 'Values must be greater than 0.' };
+  if (c1 === null) return { field: 'c1', value: (c2 * v2) / v1 };
+  if (v1 === null) return { field: 'v1', value: (c2 * v2) / c1 };
+  if (c2 === null) return { field: 'c2', value: (c1 * v1) / v2 };
+  return { field: 'v2', value: (c1 * v1) / c2 };
+}
+
+function serialDilution({ start, factor, steps, vol }) {
+  if (!(start > 0) || !(vol > 0)) return { error: 'Starting concentration and volume must be greater than 0.' };
+  if (!(factor > 1)) return { error: 'Dilution factor must be greater than 1.' };
+  if (!Number.isInteger(steps) || steps < 1 || steps > 20)
+    return { error: 'Number of dilutions must be a whole number from 1 to 20.' };
+  const transfer = vol / factor;
+  const rows = [];
+  for (let i = 1; i <= steps; i++) rows.push({ tube: i, conc: start / Math.pow(factor, i), transfer, diluent: vol - transfer });
+  return { rows, transfer, diluent: vol - transfer };
+}
+
+// ---------- buffer ----------
+function buffer({ pKa, pH, total, volume, stockAcid, stockBase }) {
+  if ([pKa, pH].some((v) => !Number.isFinite(v))) return { error: 'Enter pKa and target pH.' };
+  if (!(total > 0) || !(volume > 0)) return { error: 'Buffer concentration and volume must be greater than 0.' };
+  if (!(stockAcid > 0) || !(stockBase > 0)) return { error: 'Stock concentrations must be greater than 0.' };
+  const ratio = Math.pow(10, pH - pKa);
+  const nTotal = total * volume;
+  const nBase = (nTotal * ratio) / (1 + ratio);
+  const nAcid = nTotal - nBase;
+  const vAcid = nAcid / stockAcid;
+  const vBase = nBase / stockBase;
+  const water = volume - vAcid - vBase;
+  const warnings = [];
+  if (pH < 0 || pH > 14) warnings.push('Target pH must be between 0 and 14.');
+  if (Math.abs(pH - pKa) > 1)
+    warnings.push('Target pH is more than 1 unit from the pKa, so buffering capacity is poor. Consider a different buffer.');
+  if (water < 0) warnings.push('Stock solutions are too dilute to reach this concentration in this volume. Use more concentrated stocks.');
+  return { ratio, nAcid, nBase, vAcid, vBase, water, warnings };
+}
+
+// ---------- centrifuge ----------
+const RCF_K = 1.118e-5;
+const rcfFromRpm = (rpm, radiusCm) => RCF_K * radiusCm * rpm * rpm;
+const rpmFromRcf = (rcf, radiusCm) => Math.sqrt(rcf / (RCF_K * radiusCm));
+
+// ---------- PCR ----------
+function pcr({ rows, reactions, overage, total }) {
+  if (!(total > 0)) return { error: 'Reaction volume must be greater than 0.' };
+  if (!(reactions >= 1)) return { error: 'Enter at least 1 reaction.' };
+  const over = Number.isFinite(overage) && overage >= 0 ? overage : 0;
+  const nEff = reactions * (1 + over / 100);
+  const lines = rows.map((r) => {
+    const calc = r.stock > 0 && r.final > 0;
+    const vol = calc ? (total * r.final) / r.stock : r.fixedVol > 0 ? r.fixedVol : 0;
+    const warnings = [];
+    if (calc && r.final > r.stock) warnings.push('Final is higher than stock.');
+    if (vol > 0 && vol < 0.5) warnings.push('Under 0.5 µL is hard to pipette accurately; use an intermediate dilution.');
+    return { name: r.name, vol, inMix: r.inMix, calc, warnings };
+  });
+  const used = lines.reduce((s, l) => s + l.vol, 0);
+  const water = total - used;
+  const all = lines.concat([{ name: 'Water (nuclease-free)', vol: water, inMix: true, calc: true, warnings: [] }]);
+  all.forEach((l) => { l.mixVol = l.inMix ? l.vol * nEff : 0; });
+  return {
+    lines: all,
+    nEff,
+    mixTotal: all.reduce((s, l) => s + l.mixVol, 0),
+    perTubeMix: all.filter((l) => l.inMix).reduce((s, l) => s + l.vol, 0),
+    addedPerTube: all.filter((l) => !l.inMix).reduce((s, l) => s + l.vol, 0),
+    error: water < 0 ? 'Components add up to more than the reaction volume.' : null,
+  };
+}
+
+// ---------- recipes ----------
+// ingredient: { name, mw, form: 'solid'|'liquid', density, purity, conc, unit, note }
+// Returns the amount of each ingredient needed for `volumeL` of final solution.
+function recipeLines(ingredients, volumeL) {
+  const warnings = [];
+  if (!(volumeL > 0)) return { error: 'Volume must be greater than 0.' };
+  const lines = ingredients.map((ing, index) => {
+    const w = [];
+    let grams = null;
+    let litres = null;
+    const conc = Number(ing.conc);
+    if (!(conc > 0)) w.push('Concentration is missing.');
+    else if (ing.unit in CONC) {
+      if (!(ing.mw > 0)) w.push('Molecular weight is missing, so the amount cannot be calculated.');
+      else grams = conc * CONC[ing.unit] * volumeL * ing.mw;
+      if (conc * CONC[ing.unit] > 10) w.push('Concentration above 10 M is unusual; check the units.');
+    } else if (ing.unit in MASS_VOL_GL) {
+      grams = conc * MASS_VOL_GL[ing.unit] * volumeL;
+    } else if (ing.unit === '% v/v') {
+      if (ing.form === 'solid') w.push('% v/v only makes sense for liquids.');
+      else litres = (conc / 100) * volumeL;
+      if (conc > 100) w.push('Percent v/v above 100 is impossible.');
+    } else w.push('Unknown unit.');
+
+    let kind = null;
+    let amount = null;
+    let purityNote = '';
+    if (litres !== null) {
+      kind = 'volume';
+      amount = litres;
+    } else if (grams !== null) {
+      if (ing.form === 'liquid') {
+        const v = liquidVolume(grams, ing.density, ing.purity);
+        if (v === null) {
+          kind = 'mass';
+          amount = grams;
+          w.push('Liquid reagent has no density, so weigh it instead of measuring volume.');
+        } else {
+          kind = 'volume';
+          amount = v;
+        }
+      } else {
+        kind = 'mass';
+        // A reagent that is only 98% pure needs 2% more weighed out to deliver the same amount of compound.
+        if (ing.purity > 0 && ing.purity < 100) {
+          grams /= ing.purity / 100;
+          purityNote = `Adjusted for ${ing.purity}% purity.`;
+        }
+        amount = grams;
+        const gPerL = grams / volumeL;
+        if (ing.solubility > 0 && gPerL > ing.solubility)
+          w.push(`Needs ${gPerL.toPrecision(3)} g/L, above the approximate solubility of ${ing.solubility} g/L.`);
+        if (grams < 0.001) w.push('Under 1 mg is hard to weigh; make a concentrated stock and dilute.');
+      }
+    }
+    if (kind === 'volume' && amount < 2e-6 && amount > 0)
+      w.push('Under 2 µL is hard to pipette accurately; make an intermediate dilution.');
+    return { index, name: ing.name, kind, amount, note: [ing.note, purityNote].filter(Boolean).join(' '), warnings: w };
+  });
+  const liquidSum = lines.reduce((s, l) => s + (l.kind === 'volume' ? l.amount : 0), 0);
+  const waterL = volumeL - liquidSum;
+  if (waterL < 0) warnings.push('Liquid ingredients add up to more than the final volume.');
+  return { lines, waterL, warnings };
+}
+
+function formatAmount(line) {
+  if (line.amount === null || line.amount === undefined) return '—';
+  const b = bestUnit(line.amount, line.kind === 'volume' ? VOL : MASS);
+  return `${fmt(b.value)} ${b.unit}`;
+}
+
+function addDays(isoDate, days) {
+  const d = new Date(isoDate + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// ---------- formatting ----------
+function bestUnit(value, units) {
+  const entries = Object.entries(units).sort((a, b) => b[1] - a[1]);
+  for (const [name, f] of entries) if (Math.abs(value) / f >= 1) return { value: value / f, unit: name };
+  const [name, f] = entries[entries.length - 1];
+  return { value: value / f, unit: name };
+}
+
+function fmt(n, digits = 4) {
+  if (!Number.isFinite(n)) return '—';
+  if (n === 0) return '0';
+  const a = Math.abs(n);
+  if (a >= 1e6 || a < 1e-3) return n.toExponential(digits - 1);
+  return String(Number(n.toPrecision(digits)));
+}
+
+const withUnit = (value, units) => {
+  const b = bestUnit(value, units);
+  return `${fmt(b.value)} ${b.unit}`;
+};
+
+// ---------- worked solutions (teaching mode) ----------
+function explainMolarity({ mw, conc, vol, mass }, r) {
+  if (r.error) return [];
+  const steps = ['Formula: mass (g) = concentration (mol/L) × volume (L) × MW (g/mol)'];
+  if (r.field === 'mass')
+    steps.push(`mass = ${fmt(conc)} mol/L × ${fmt(vol)} L × ${fmt(mw)} g/mol = ${fmt(r.value)} g`);
+  else if (r.field === 'conc')
+    steps.push(`Rearranged: conc = mass / (MW × volume) = ${fmt(mass)} g / (${fmt(mw)} g/mol × ${fmt(vol)} L) = ${fmt(r.value)} mol/L`);
+  else steps.push(`Rearranged: volume = mass / (MW × conc) = ${fmt(mass)} g / (${fmt(mw)} g/mol × ${fmt(conc)} mol/L) = ${fmt(r.value)} L`);
+  steps.push('Units are converted to mol/L, L and g before calculating, then shown in a convenient unit.');
+  return steps;
+}
+
+function explainDilution({ c1, v1, c2, v2 }, r) {
+  if (r.error) return [];
+  const steps = ['Formula: C₁ × V₁ = C₂ × V₂ (moles are conserved when only solvent is added)'];
+  const t = { c1: 'C₁', v1: 'V₁', c2: 'C₂', v2: 'V₂' }[r.field];
+  const rearr = { c1: 'C₂ × V₂ / V₁', v1: 'C₂ × V₂ / C₁', c2: 'C₁ × V₁ / V₂', v2: 'C₁ × V₁ / C₂' }[r.field];
+  steps.push(`Solve for ${t} = ${rearr}`);
+  steps.push(`Result: ${t} = ${fmt(r.value)} (in mol/L or L)`);
+  steps.push('Diluent to add = V₂ − V₁.');
+  return steps;
+}
+
+function explainBuffer({ pKa, pH, total, volume }, r) {
+  if (r.error) return [];
+  return [
+    'Henderson-Hasselbalch: pH = pKa + log₁₀([base]/[acid])',
+    `[base]/[acid] = 10^(pH − pKa) = 10^(${fmt(pH)} − ${fmt(pKa)}) = ${fmt(r.ratio)}`,
+    `Total moles = ${fmt(total)} mol/L × ${fmt(volume)} L = ${fmt(total * volume)} mol`,
+    `moles base = total × ratio / (1 + ratio) = ${fmt(r.nBase)} mol; moles acid = total − base = ${fmt(r.nAcid)} mol`,
+    'Volume of each stock = moles / stock concentration; water makes up the rest.',
+  ];
+}
+
+function explainRcf({ rpm, rcf, radiusCm }, r) {
+  if (r.error) return [];
+  return [
+    'Formula: RCF = 1.118 × 10⁻⁵ × r (cm) × RPM²',
+    r.field === 'rcf'
+      ? `RCF = 1.118e-5 × ${fmt(radiusCm)} × ${fmt(rpm)}² = ${fmt(r.value)} × g`
+      : `RPM = √(RCF / (1.118e-5 × r)) = √(${fmt(rcf)} / (1.118e-5 × ${fmt(radiusCm)})) = ${fmt(r.value)}`,
+  ];
+}
+
+return { CONC, VOL, MASS, LENGTH, RECIPE_UNITS, BUFFERS, molarity, liquidVolume, neatMolarity, dilution, serialDilution, buffer, rcfFromRpm, rpmFromRcf, pcr, recipeLines, formatAmount, addDays, bestUnit, fmt, withUnit, explainMolarity, explainDilution, explainBuffer, explainRcf };
+})();
+const __m_js_store_js = (() => {
+const { RECIPE_UNITS, CONC, addDays } = __m_js_calc_js;
+// Local-first data layer. Everything lives on this device, in one JSON document in localStorage.
+// The storage object is injectable so the logic can be tested without a browser.
+
+const SCHEMA = 1;
+const APP_ID = 'labkit-recipes';
+const KEY = 'lkr:v1';
+const LIMITS = { recipes: 500, batches: 5000, customReagents: 300, history: 20, ingredients: 60 };
+
+class ValidationError extends Error {}
+
+// ---------- validation (the same rules as the server version) ----------
+function str(v, name, { max = 200, required = false } = {}) {
+  if (v === undefined || v === null) v = '';
+  if (typeof v !== 'string') throw new ValidationError(`${name} must be text.`);
+  v = v.trim();
+  if (required && !v) throw new ValidationError(`${name} is required.`);
+  if (v.length > max) throw new ValidationError(`${name} is too long (max ${max} characters).`);
+  return v;
+}
+function num(v, name, { min = -Infinity, max = Infinity, required = false, int = false } = {}) {
+  if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) {
+    if (required) throw new ValidationError(`${name} is required.`);
+    return null;
+  }
+  const n = typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n) || n < min || n > max || (int && !Number.isInteger(n))) throw new ValidationError(`${name} is invalid.`);
+  return n;
+}
+
+function cleanIngredient(i, n = 0) {
+  const where = `Ingredient ${n + 1}`;
+  if (!i || typeof i !== 'object') throw new ValidationError(`${where} is invalid.`);
+  const unit = i.unit;
+  if (!RECIPE_UNITS.includes(unit)) throw new ValidationError(`${where}: choose a unit.`);
+  const form = i.form === 'liquid' ? 'liquid' : 'solid';
+  const mw = num(i.mw, `${where} molecular weight`, { min: 0.001, max: 1e8 });
+  if (unit in CONC && mw === null) throw new ValidationError(`${where}: a molecular weight is needed for a molar concentration.`);
+  if (unit === '% v/v' && form === 'solid') throw new ValidationError(`${where}: % v/v only applies to liquids.`);
+  return {
+    reagentId: i.reagentId === null || i.reagentId === undefined ? null : String(i.reagentId).slice(0, 40),
+    name: str(i.name, `${where} name`, { required: true, max: 120 }),
+    mw,
+    form,
+    density: num(i.density, `${where} density`, { min: 0.01, max: 30 }),
+    purity: num(i.purity, `${where} purity`, { min: 0.1, max: 100 }),
+    solubility: num(i.solubility, `${where} solubility`, { min: 0, max: 1e5 }),
+    conc: num(i.conc, `${where} amount`, { min: 1e-12, max: 1e9, required: true }),
+    unit,
+    note: str(i.note, `${where} note`, { max: 200 }),
+  };
+}
+
+function cleanRecipe(input) {
+  if (!input || typeof input !== 'object') throw new ValidationError('Recipe is invalid.');
+  const list = input.ingredients;
+  if (!Array.isArray(list) || list.length < 1 || list.length > LIMITS.ingredients) throw new ValidationError(`A recipe needs 1 to ${LIMITS.ingredients} ingredients.`);
+  return {
+    name: str(input.name, 'Name', { required: true, max: 120 }),
+    description: str(input.description, 'Description', { max: 1000 }),
+    finalVolumeMl: num(input.finalVolumeMl ?? 1000, 'Standard volume', { min: 0.001, max: 1e6, required: true }),
+    ph: num(input.ph, 'pH', { min: 0, max: 14 }),
+    shelfLifeDays: num(input.shelfLifeDays, 'Shelf life', { min: 1, max: 3650, int: true }),
+    steps: str(input.steps, 'Method', { max: 5000 }),
+    ingredients: list.map((x, n) => cleanIngredient(x, n)),
+  };
+}
+
+const uid = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+const nowIso = () => new Date().toISOString();
+const clone = (v) => JSON.parse(JSON.stringify(v));
+
+function emptyData() {
+  return {
+    schema: SCHEMA,
+    settings: { labName: '', initials: '', tolerancePct: 2, theme: 'auto' },
+    recipes: [],
+    batches: [],
+    customReagents: [],
+    counters: {},
+    activeBench: null,
+    lastBackup: null,
+    flags: { starterOffered: false, welcomed: false },
+  };
+}
+
+function browserStorage() {
+  try {
+    const s = globalThis.localStorage;
+    const probe = '__lkr_probe__';
+    s.setItem(probe, '1');
+    s.removeItem(probe);
+    return s;
+  } catch {
+    return null; // blocked (private window, strict settings)
+  }
+}
+
+function createStore(storage = browserStorage()) {
+  let data = emptyData();
+  let persistent = !!storage;
+  let recovered = false;
+  const listeners = new Set();
+  let temp = null; // an unsaved "quick make" recipe
+
+  function load() {
+    if (!storage) return;
+    let raw = null;
+    try {
+      raw = storage.getItem(KEY);
+    } catch {
+      persistent = false;
+      return;
+    }
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || parsed.schema > SCHEMA) throw new Error('unreadable');
+      data = { ...emptyData(), ...parsed, settings: { ...emptyData().settings, ...(parsed.settings || {}) }, flags: { ...emptyData().flags, ...(parsed.flags || {}) } };
+    } catch {
+      // Keep the damaged copy so nothing is silently destroyed, and start clean.
+      try { storage.setItem(`${KEY}:damaged:${Date.now()}`, raw); } catch { /* ignore */ }
+      recovered = true;
+      data = emptyData();
+    }
+  }
+  load();
+
+  function save() {
+    if (storage && persistent) {
+      try {
+        storage.setItem(KEY, JSON.stringify(data));
+      } catch {
+        persistent = false; // full or blocked
+      }
+    }
+    listeners.forEach((fn) => fn());
+  }
+
+  const api = {
+    get persistent() { return persistent; },
+    get recovered() { return recovered; },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+
+    // ----- settings and flags -----
+    settings: () => data.settings,
+    setSettings(patch) {
+      const s = { ...data.settings };
+      if ('labName' in patch) s.labName = str(patch.labName, 'Lab name', { max: 80 });
+      if ('initials' in patch) s.initials = str(patch.initials, 'Initials', { max: 8 });
+      if ('tolerancePct' in patch) s.tolerancePct = num(patch.tolerancePct, 'Tolerance', { min: 0.1, max: 20, required: true });
+      if ('theme' in patch) s.theme = ['auto', 'light', 'dark'].includes(patch.theme) ? patch.theme : 'auto';
+      data.settings = s;
+      save();
+    },
+    flags: () => data.flags,
+    setFlag(k, v) { data.flags = { ...data.flags, [k]: !!v }; save(); },
+
+    // ----- recipes -----
+    recipes: () => [...data.recipes].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+    getRecipe(id) { return id === 'temp' ? temp : data.recipes.find((r) => r.id === id) || null; },
+    setTemp(recipe) { temp = recipe ? { ...cleanRecipe(recipe), id: 'temp', version: 1, history: [], createdAt: nowIso(), updatedAt: nowIso() } : null; return temp; },
+    saveRecipe(input, id = null) {
+      const clean = cleanRecipe(input);
+      const now = nowIso();
+      if (id) {
+        const cur = data.recipes.find((r) => r.id === id);
+        if (!cur) throw new ValidationError('That recipe no longer exists.');
+        const history = [{ version: cur.version, savedAt: cur.updatedAt, snapshot: snapshotOf(cur) }, ...(cur.history || [])].slice(0, LIMITS.history);
+        Object.assign(cur, clean, { version: cur.version + 1, updatedAt: now, history });
+        save();
+        return cur;
+      }
+      if (data.recipes.length >= LIMITS.recipes) throw new ValidationError(`You have reached the limit of ${LIMITS.recipes} recipes.`);
+      const rec = { id: uid(), ...clean, version: 1, history: [], createdAt: now, updatedAt: now, lastMadeAt: null };
+      data.recipes.push(rec);
+      save();
+      return rec;
+    },
+    restoreVersion(id, version) {
+      const cur = data.recipes.find((r) => r.id === id);
+      const h = cur && (cur.history || []).find((x) => x.version === version);
+      if (!h) throw new ValidationError('That version is not available.');
+      return api.saveRecipe(h.snapshot, id); // restoring is itself a new version, so nothing is lost
+    },
+    duplicateRecipe(id) {
+      const cur = api.getRecipe(id);
+      if (!cur) throw new ValidationError('That recipe no longer exists.');
+      return api.saveRecipe({ ...snapshotOf(cur), name: `${cur.name} (copy)`.slice(0, 120) });
+    },
+    deleteRecipe(id) {
+      const i = data.recipes.findIndex((r) => r.id === id);
+      if (i < 0) return null;
+      const [gone] = data.recipes.splice(i, 1);
+      save();
+      return gone;
+    },
+    undeleteRecipe(rec) {
+      if (rec && !data.recipes.some((r) => r.id === rec.id)) { data.recipes.push(rec); save(); }
+    },
+
+    // ----- batches (records of what was made) -----
+    batches: () => [...data.batches].sort((a, b) => (a.madeAt < b.madeAt ? 1 : -1)),
+    getBatch: (id) => data.batches.find((b) => b.id === id) || null,
+    addBatch(input) {
+      if (data.batches.length >= LIMITS.batches) throw new ValidationError(`You have reached the limit of ${LIMITS.batches} batch records. Export and clear old ones.`);
+      const madeAt = input.madeAt || nowIso();
+      const year = madeAt.slice(0, 4);
+      data.counters[year] = (data.counters[year] || 0) + 1;
+      const rec = {
+        id: uid(),
+        number: `B-${year}-${String(data.counters[year]).padStart(4, '0')}`,
+        madeAt,
+        expiresAt: input.shelfLifeDays ? addDays(madeAt.slice(0, 10), input.shelfLifeDays) : null,
+        recipeId: input.recipeId === 'temp' ? null : input.recipeId || null,
+        recipeName: str(input.recipeName, 'Recipe name', { required: true, max: 120 }),
+        recipeVersion: input.recipeVersion || 1,
+        volumeMl: num(input.volumeMl, 'Volume', { min: 0.001, max: 1e6, required: true }),
+        initials: str(input.initials, 'Initials', { max: 8 }),
+        labName: str(input.labName, 'Lab name', { max: 80 }),
+        notes: str(input.notes, 'Notes', { max: 1000 }),
+        ph: input.ph ?? null,
+        composition: (input.composition || []).slice(0, LIMITS.ingredients),
+        lines: (input.lines || []).slice(0, LIMITS.ingredients),
+        steps: str(input.steps, 'Method', { max: 5000 }),
+      };
+      data.batches.push(rec);
+      const r = data.recipes.find((x) => x.id === rec.recipeId);
+      if (r) r.lastMadeAt = madeAt;
+      save();
+      return rec;
+    },
+    deleteBatch(id) {
+      const i = data.batches.findIndex((b) => b.id === id);
+      if (i < 0) return null;
+      const [gone] = data.batches.splice(i, 1);
+      save();
+      return gone;
+    },
+    undeleteBatch(rec) { if (rec && !data.batches.some((b) => b.id === rec.id)) { data.batches.push(rec); save(); } },
+
+    // ----- the bench session in progress (survives a locked phone or a closed tab) -----
+    activeBench: () => data.activeBench,
+    setActiveBench(s) { data.activeBench = s; save(); },
+    clearActiveBench() { data.activeBench = null; save(); },
+
+    // ----- the user's own reagents -----
+    customReagents: () => data.customReagents,
+    addCustomReagent(r) {
+      if (data.customReagents.length >= LIMITS.customReagents) throw new ValidationError('Too many custom reagents.');
+      const form = r.form === 'liquid' ? 'liquid' : 'solid';
+      const rec = {
+        id: `c-${uid().slice(0, 8)}`,
+        name: str(r.name, 'Name', { required: true, max: 120 }),
+        formula: str(r.formula, 'Formula', { max: 80 }),
+        mw: num(r.mw, 'Molecular weight', { min: 0.001, max: 1e8 }),
+        form,
+        density: num(r.density, 'Density', { min: 0.01, max: 30 }),
+        purity: num(r.purity, 'Purity', { min: 0.1, max: 100 }),
+        solubility: num(r.solubility, 'Solubility', { min: 0, max: 1e5 }),
+        hazards: str(r.hazards, 'Hazards', { max: 500 }),
+        storage: str(r.storage, 'Storage', { max: 200 }),
+        custom: true,
+      };
+      data.customReagents.push(rec);
+      save();
+      return rec;
+    },
+    removeCustomReagent(id) { data.customReagents = data.customReagents.filter((r) => r.id !== id); save(); },
+
+    // ----- backup and restore -----
+    lastBackup: () => data.lastBackup,
+    exportData() {
+      data.lastBackup = nowIso();
+      save();
+      return { app: APP_ID, schema: SCHEMA, exportedAt: data.lastBackup, data: { settings: data.settings, recipes: data.recipes, batches: data.batches, customReagents: data.customReagents, counters: data.counters } };
+    },
+    // mode "merge": keep what is here, add or update from the file. "replace": the file becomes everything.
+    importData(file, mode = 'merge') {
+      const report = validateExport(file);
+      const next = mode === 'replace' ? emptyData() : clone(data);
+      next.activeBench = mode === 'replace' ? null : data.activeBench;
+      next.flags = mode === 'replace' ? { ...emptyData().flags, welcomed: true } : data.flags;
+      next.lastBackup = data.lastBackup;
+      const counts = { recipesAdded: 0, recipesUpdated: 0, batchesAdded: 0, reagentsAdded: 0 };
+      for (const r of report.recipes) {
+        const have = next.recipes.find((x) => x.id === r.id);
+        if (!have) { next.recipes.push(r); counts.recipesAdded++; } else if (r.updatedAt > have.updatedAt) { Object.assign(have, r); counts.recipesUpdated++; }
+      }
+      for (const b of report.batches) if (!next.batches.some((x) => x.id === b.id)) { next.batches.push(b); counts.batchesAdded++; }
+      for (const c of report.customReagents) if (!next.customReagents.some((x) => x.id === c.id)) { next.customReagents.push(c); counts.reagentsAdded++; }
+      for (const [y, n] of Object.entries(report.counters)) next.counters[y] = Math.max(next.counters[y] || 0, n);
+      if (mode === 'replace') next.settings = { ...next.settings, ...report.settings };
+      if (next.recipes.length > LIMITS.recipes || next.batches.length > LIMITS.batches) throw new ValidationError('That file would exceed the size limits.');
+      data = next;
+      save();
+      return counts;
+    },
+    eraseAll() { data = emptyData(); temp = null; if (storage) { try { storage.removeItem(KEY); } catch { /* ignore */ } } save(); },
+    stats: () => ({ recipes: data.recipes.length, batches: data.batches.length, bytes: persistent && storage ? (storage.getItem(KEY) || '').length : 0 }),
+  };
+  return api;
+}
+
+function snapshotOf(r) {
+  return { name: r.name, description: r.description, finalVolumeMl: r.finalVolumeMl, ph: r.ph, shelfLifeDays: r.shelfLifeDays, steps: r.steps, ingredients: clone(r.ingredients) };
+}
+
+// Accepts only files this app wrote, and re-validates every record, so a bad or hand-edited file cannot corrupt the app.
+function validateExport(file) {
+  if (!file || typeof file !== 'object' || file.app !== APP_ID) throw new ValidationError('This is not a LabKit Recipes backup file.');
+  if (typeof file.schema !== 'number' || file.schema > SCHEMA) throw new ValidationError('This backup was made by a newer version of the app. Update the app first.');
+  const d = file.data;
+  if (!d || typeof d !== 'object') throw new ValidationError('The backup file is empty or damaged.');
+  const list = (v, max) => { if (v === undefined) return []; if (!Array.isArray(v) || v.length > max) throw new ValidationError('The backup file has too many items or a damaged list.'); return v; };
+  const recipes = list(d.recipes, LIMITS.recipes).map((r, n) => {
+    const clean = cleanRecipe(r);
+    if (typeof r.id !== 'string' || !r.id || r.id.length > 60 || r.id === 'temp') throw new ValidationError(`Recipe ${n + 1} in the file has no valid id.`);
+    const history = Array.isArray(r.history) ? r.history.slice(0, LIMITS.history).flatMap((h) => { try { return [{ version: num(h.version, 'v', { int: true, min: 1, required: true }), savedAt: str(h.savedAt, 'date', { max: 40 }), snapshot: cleanRecipe(h.snapshot) }]; } catch { return []; } }) : [];
+    const stamp = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : nowIso());
+    return { id: r.id, ...clean, version: num(r.version ?? 1, 'Version', { int: true, min: 1, required: true }), history, createdAt: stamp(r.createdAt), updatedAt: stamp(r.updatedAt), lastMadeAt: r.lastMadeAt ? stamp(r.lastMadeAt) : null };
+  });
+  const batches = list(d.batches, LIMITS.batches).map((b, n) => {
+    if (!b || typeof b !== 'object' || typeof b.id !== 'string' || !b.id || b.id.length > 60) throw new ValidationError(`Batch ${n + 1} in the file has no valid id.`);
+    if (typeof b.madeAt !== 'string' || Number.isNaN(Date.parse(b.madeAt))) throw new ValidationError(`Batch ${n + 1} has no valid date.`);
+    const lines = list(b.lines, LIMITS.ingredients).map((l) => ({ name: str(l.name, 'Line name', { max: 120 }), kind: l.kind === 'volume' ? 'volume' : 'mass', target: num(l.target, 'Target', { min: 0 }), actual: num(l.actual, 'Actual', { min: 0 }), deviationPct: num(l.deviationPct, 'Deviation'), achieved: l.achieved && typeof l.achieved === 'object' ? { value: num(l.achieved.value, 'Achieved'), unit: str(l.achieved.unit, 'Unit', { max: 12 }) } : null }));
+    const composition = list(b.composition, LIMITS.ingredients).map((c) => ({ name: str(c.name, 'Name', { max: 120 }), conc: num(c.conc, 'Amount', { min: 0 }), unit: str(c.unit, 'Unit', { max: 12 }) }));
+    return {
+      id: b.id, number: str(b.number, 'Batch number', { required: true, max: 30 }), madeAt: b.madeAt, expiresAt: b.expiresAt ? str(b.expiresAt, 'Expiry', { max: 12 }) : null,
+      recipeId: b.recipeId ? str(b.recipeId, 'Recipe id', { max: 60 }) : null, recipeName: str(b.recipeName, 'Recipe name', { required: true, max: 120 }),
+      recipeVersion: num(b.recipeVersion ?? 1, 'Version', { int: true, min: 1 }), volumeMl: num(b.volumeMl, 'Volume', { min: 0.001, max: 1e6, required: true }),
+      initials: str(b.initials, 'Initials', { max: 8 }), labName: str(b.labName, 'Lab name', { max: 80 }), notes: str(b.notes, 'Notes', { max: 1000 }),
+      ph: b.ph === null || b.ph === undefined ? null : num(b.ph, 'pH', { min: 0, max: 14 }), composition, lines, steps: str(b.steps, 'Method', { max: 5000 }),
+    };
+  });
+  const customReagents = list(d.customReagents, LIMITS.customReagents).map((c) => ({
+    id: str(c.id, 'Reagent id', { required: true, max: 40 }), name: str(c.name, 'Name', { required: true, max: 120 }), formula: str(c.formula, 'Formula', { max: 80 }),
+    mw: num(c.mw, 'MW', { min: 0.001, max: 1e8 }), form: c.form === 'liquid' ? 'liquid' : 'solid', density: num(c.density, 'Density', { min: 0.01, max: 30 }),
+    purity: num(c.purity, 'Purity', { min: 0.1, max: 100 }), solubility: num(c.solubility, 'Solubility', { min: 0, max: 1e5 }), hazards: str(c.hazards, 'Hazards', { max: 500 }),
+    storage: str(c.storage, 'Storage', { max: 200 }), custom: true,
+  }));
+  const counters = {};
+  for (const [y, n] of Object.entries(d.counters || {})) if (/^\d{4}$/.test(y) && Number.isInteger(n) && n >= 0 && n < 1e7) counters[y] = n;
+  const settings = {};
+  if (d.settings && typeof d.settings === 'object') {
+    if (typeof d.settings.labName === 'string') settings.labName = d.settings.labName.slice(0, 80);
+    if (typeof d.settings.initials === 'string') settings.initials = d.settings.initials.slice(0, 8);
+    if (Number.isFinite(d.settings.tolerancePct) && d.settings.tolerancePct >= 0.1 && d.settings.tolerancePct <= 20) settings.tolerancePct = d.settings.tolerancePct;
+  }
+  return { recipes, batches, customReagents, counters, settings };
+}
+
+return { SCHEMA, APP_ID, LIMITS, ValidationError, cleanIngredient, cleanRecipe, emptyData, browserStorage, createStore, validateExport };
+})();
+const __m_js_reagents_js = (() => {
+
+// Built-in reagent library (typical, approximate values). Generated by tools/gen-reagents.mjs.
+const REAGENTS = [
+ {
+  "id": 1,
+  "name": "Sodium chloride",
+  "formula": "NaCl",
+  "mw": 58.44,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 360,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 2,
+  "name": "Potassium chloride",
+  "formula": "KCl",
+  "mw": 74.55,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 344,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 3,
+  "name": "Magnesium chloride hexahydrate",
+  "formula": "MgCl2·6H2O",
+  "mw": 203.3,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 540,
+  "hazards": "Low hazard. Hygroscopic.",
+  "storage": "Room temperature, tightly closed"
+ },
+ {
+  "id": 4,
+  "name": "Magnesium chloride (anhydrous)",
+  "formula": "MgCl2",
+  "mw": 95.21,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 540,
+  "hazards": "Irritant. Very hygroscopic.",
+  "storage": "Room temperature, tightly closed"
+ },
+ {
+  "id": 5,
+  "name": "Calcium chloride dihydrate",
+  "formula": "CaCl2·2H2O",
+  "mw": 147.01,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Eye irritant.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 6,
+  "name": "Calcium chloride (anhydrous)",
+  "formula": "CaCl2",
+  "mw": 110.98,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 745,
+  "hazards": "Eye irritant. Dissolving releases heat.",
+  "storage": "Room temperature, tightly closed"
+ },
+ {
+  "id": 7,
+  "name": "Sodium phosphate dibasic (anhydrous)",
+  "formula": "Na2HPO4",
+  "mw": 141.96,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 77,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 8,
+  "name": "Sodium phosphate dibasic heptahydrate",
+  "formula": "Na2HPO4·7H2O",
+  "mw": 268.07,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 9,
+  "name": "Sodium phosphate monobasic (anhydrous)",
+  "formula": "NaH2PO4",
+  "mw": 119.98,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 850,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 10,
+  "name": "Sodium phosphate monobasic monohydrate",
+  "formula": "NaH2PO4·H2O",
+  "mw": 137.99,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 11,
+  "name": "Potassium phosphate monobasic",
+  "formula": "KH2PO4",
+  "mw": 136.09,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 222,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 12,
+  "name": "Potassium phosphate dibasic",
+  "formula": "K2HPO4",
+  "mw": 174.18,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 1500,
+  "hazards": "Low hazard. Hygroscopic.",
+  "storage": "Room temperature, tightly closed"
+ },
+ {
+  "id": 13,
+  "name": "Sodium acetate (anhydrous)",
+  "formula": "CH3COONa",
+  "mw": 82.03,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 465,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 14,
+  "name": "Sodium acetate trihydrate",
+  "formula": "CH3COONa·3H2O",
+  "mw": 136.08,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 15,
+  "name": "Ammonium sulfate",
+  "formula": "(NH4)2SO4",
+  "mw": 132.14,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 706,
+  "hazards": "Low hazard. Harmful to aquatic life.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 16,
+  "name": "Sodium bicarbonate",
+  "formula": "NaHCO3",
+  "mw": 84.01,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 96,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 17,
+  "name": "Sodium carbonate (anhydrous)",
+  "formula": "Na2CO3",
+  "mw": 105.99,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 215,
+  "hazards": "Eye irritant.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 18,
+  "name": "Trisodium citrate dihydrate",
+  "formula": "C6H5Na3O7·2H2O",
+  "mw": 294.1,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 425,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 19,
+  "name": "Citric acid (anhydrous)",
+  "formula": "C6H8O7",
+  "mw": 192.12,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 590,
+  "hazards": "Serious eye irritant.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 20,
+  "name": "Citric acid monohydrate",
+  "formula": "C6H8O7·H2O",
+  "mw": 210.14,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Serious eye irritant.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 21,
+  "name": "Boric acid",
+  "formula": "H3BO3",
+  "mw": 61.83,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 49,
+  "hazards": "May damage fertility or the unborn child. Handle with care.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 22,
+  "name": "Sodium azide",
+  "formula": "NaN3",
+  "mw": 65.01,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 410,
+  "hazards": "Fatal if swallowed or in contact with skin. Forms explosive azides with metals; never pour down metal drains.",
+  "storage": "Room temperature, locked"
+ },
+ {
+  "id": 23,
+  "name": "Copper(II) sulfate pentahydrate",
+  "formula": "CuSO4·5H2O",
+  "mw": 249.69,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 320,
+  "hazards": "Harmful if swallowed. Very toxic to aquatic life.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 24,
+  "name": "EDTA disodium dihydrate",
+  "formula": "C10H14N2Na2O8·2H2O",
+  "mw": 372.24,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 100,
+  "hazards": "Harmful if inhaled. Dissolves slowly; adjust pH to about 8 with NaOH.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 25,
+  "name": "EDTA (free acid)",
+  "formula": "C10H16N2O8",
+  "mw": 292.24,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 0.5,
+  "hazards": "Eye irritant. Poorly soluble until pH is raised to about 8.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 26,
+  "name": "Sodium hydroxide",
+  "formula": "NaOH",
+  "mw": 40,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 1090,
+  "hazards": "Corrosive: causes severe burns. Dissolving releases much heat; add pellets slowly to water.",
+  "storage": "Room temperature, tightly closed (absorbs CO2)"
+ },
+ {
+  "id": 27,
+  "name": "Potassium hydroxide",
+  "formula": "KOH",
+  "mw": 56.11,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 1120,
+  "hazards": "Corrosive: causes severe burns. Dissolving releases much heat.",
+  "storage": "Room temperature, tightly closed"
+ },
+ {
+  "id": 28,
+  "name": "Tris base",
+  "formula": "C4H11NO3",
+  "mw": 121.14,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 550,
+  "hazards": "Irritant. pH is temperature dependent.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 29,
+  "name": "Tris hydrochloride",
+  "formula": "C4H11NO3·HCl",
+  "mw": 157.6,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Irritant. pH is temperature dependent.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 30,
+  "name": "HEPES",
+  "formula": "C8H18N2O4S",
+  "mw": 238.3,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 31,
+  "name": "MOPS",
+  "formula": "C7H15NO4S",
+  "mw": 209.26,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard. Solutions yellow with age.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 32,
+  "name": "MES monohydrate",
+  "formula": "C6H13NO4S·H2O",
+  "mw": 213.25,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 33,
+  "name": "MES (free acid)",
+  "formula": "C6H13NO4S",
+  "mw": 195.24,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 34,
+  "name": "Glycine",
+  "formula": "C2H5NO2",
+  "mw": 75.07,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 250,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 35,
+  "name": "Tricine",
+  "formula": "C6H13NO5",
+  "mw": 179.17,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 36,
+  "name": "Imidazole",
+  "formula": "C3H4N2",
+  "mw": 68.08,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 633,
+  "hazards": "Corrosive, harmful if swallowed, may damage the unborn child.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 37,
+  "name": "Sodium dodecyl sulfate (SDS)",
+  "formula": "C12H25NaO4S",
+  "mw": 288.38,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 100,
+  "hazards": "Flammable solid. Harmful if swallowed; irritant. Avoid inhaling the powder.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 38,
+  "name": "Urea",
+  "formula": "CH4N2O",
+  "mw": 60.06,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 1080,
+  "hazards": "Low hazard. Solutions can carbamylate proteins on heating.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 39,
+  "name": "D-Glucose",
+  "formula": "C6H12O6",
+  "mw": 180.16,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 900,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 40,
+  "name": "Sucrose",
+  "formula": "C12H22O11",
+  "mw": 342.3,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 2000,
+  "hazards": "Low hazard.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 41,
+  "name": "Dithiothreitol (DTT)",
+  "formula": "C4H10O2S2",
+  "mw": 154.25,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Harmful if swallowed; irritant. Unstable in solution; prepare fresh.",
+  "storage": "-20 °C"
+ },
+ {
+  "id": 42,
+  "name": "TCEP hydrochloride",
+  "formula": "C9H15O6P·HCl",
+  "mw": 286.65,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Corrosive. Stable reductant over a wider pH range than DTT.",
+  "storage": "-20 °C, dry"
+ },
+ {
+  "id": 43,
+  "name": "IPTG",
+  "formula": "C9H18O5S",
+  "mw": 238.3,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "-20 °C"
+ },
+ {
+  "id": 44,
+  "name": "PMSF",
+  "formula": "C7H7FO2S",
+  "mw": 174.19,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Toxic and corrosive. Dissolve in isopropanol or ethanol; unstable in water.",
+  "storage": "4 °C, dry"
+ },
+ {
+  "id": 45,
+  "name": "Ampicillin sodium salt",
+  "formula": "C16H18N3NaO4S",
+  "mw": 371.39,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "May cause allergic reactions. Prepare stocks fresh or freeze.",
+  "storage": "-20 °C"
+ },
+ {
+  "id": 46,
+  "name": "Kanamycin sulfate",
+  "formula": "C18H36N4O11·H2SO4",
+  "mw": 582.58,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "May damage the unborn child.",
+  "storage": "4 °C"
+ },
+ {
+  "id": 47,
+  "name": "Chloramphenicol",
+  "formula": "C11H12Cl2N2O5",
+  "mw": 323.13,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Suspected carcinogen. Dissolve in ethanol.",
+  "storage": "4 °C"
+ },
+ {
+  "id": 48,
+  "name": "Ethidium bromide",
+  "formula": "C21H20BrN3",
+  "mw": 394.29,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 40,
+  "hazards": "Suspected mutagen; toxic if inhaled. Wear gloves; dispose of as hazardous waste.",
+  "storage": "Room temperature, protected from light"
+ },
+ {
+  "id": 49,
+  "name": "Acrylamide",
+  "formula": "C3H5NO",
+  "mw": 71.08,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Toxic, neurotoxic, suspected carcinogen and mutagen. Weigh powder in a fume hood.",
+  "storage": "4 °C"
+ },
+ {
+  "id": 50,
+  "name": "N,N′-Methylenebisacrylamide",
+  "formula": "C7H10N2O2",
+  "mw": 154.17,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 20,
+  "hazards": "Harmful if swallowed. Handle as acrylamide.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 51,
+  "name": "Ammonium persulfate (APS)",
+  "formula": "(NH4)2S2O8",
+  "mw": 228.2,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": 800,
+  "hazards": "Oxidizer; harmful; may cause allergic reactions. Make fresh.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 52,
+  "name": "Trichloroacetic acid (TCA)",
+  "formula": "C2HCl3O2",
+  "mw": 163.39,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Corrosive. Very hygroscopic.",
+  "storage": "Room temperature, tightly closed"
+ },
+ {
+  "id": 53,
+  "name": "ATP disodium salt",
+  "formula": "C10H14N5Na2O13P3",
+  "mw": 551.14,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard. Hydrolyses in acidic solution.",
+  "storage": "-20 °C"
+ },
+ {
+  "id": 54,
+  "name": "Bovine serum albumin (BSA)",
+  "formula": "protein",
+  "mw": 66463,
+  "form": "solid",
+  "density": null,
+  "purity": null,
+  "solubility": null,
+  "hazards": "Low hazard.",
+  "storage": "4 °C or -20 °C"
+ },
+ {
+  "id": 55,
+  "name": "Hydrochloric acid 37%",
+  "formula": "HCl",
+  "mw": 36.46,
+  "form": "liquid",
+  "density": 1.18,
+  "purity": 37,
+  "solubility": null,
+  "hazards": "Corrosive; vapor irritates the respiratory tract. Use in a fume hood. Add acid to water.",
+  "storage": "Room temperature, acid cabinet"
+ },
+ {
+  "id": 56,
+  "name": "Acetic acid (glacial)",
+  "formula": "CH3COOH",
+  "mw": 60.05,
+  "form": "liquid",
+  "density": 1.049,
+  "purity": 99.7,
+  "solubility": null,
+  "hazards": "Flammable; causes severe burns. Use in a fume hood.",
+  "storage": "Room temperature, flammables cabinet"
+ },
+ {
+  "id": 57,
+  "name": "Sulfuric acid 98%",
+  "formula": "H2SO4",
+  "mw": 98.08,
+  "form": "liquid",
+  "density": 1.84,
+  "purity": 98,
+  "solubility": null,
+  "hazards": "Corrosive: severe burns. Always add acid slowly to water, never the reverse.",
+  "storage": "Room temperature, acid cabinet"
+ },
+ {
+  "id": 58,
+  "name": "Nitric acid 69%",
+  "formula": "HNO3",
+  "mw": 63.01,
+  "form": "liquid",
+  "density": 1.41,
+  "purity": 69,
+  "solubility": null,
+  "hazards": "Oxidizer; corrosive. Keep away from organics.",
+  "storage": "Room temperature, acid cabinet"
+ },
+ {
+  "id": 59,
+  "name": "Phosphoric acid 85%",
+  "formula": "H3PO4",
+  "mw": 98,
+  "form": "liquid",
+  "density": 1.685,
+  "purity": 85,
+  "solubility": null,
+  "hazards": "Corrosive.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 60,
+  "name": "Ammonium hydroxide 28%",
+  "formula": "NH4OH",
+  "mw": 17.03,
+  "form": "liquid",
+  "density": 0.9,
+  "purity": 28,
+  "solubility": null,
+  "hazards": "Corrosive; vapor irritates the respiratory tract. Use in a fume hood.",
+  "storage": "Room temperature, ventilated"
+ },
+ {
+  "id": 61,
+  "name": "Ethanol (absolute)",
+  "formula": "C2H5OH",
+  "mw": 46.07,
+  "form": "liquid",
+  "density": 0.789,
+  "purity": 99.8,
+  "solubility": null,
+  "hazards": "Highly flammable.",
+  "storage": "Room temperature, flammables cabinet"
+ },
+ {
+  "id": 62,
+  "name": "Methanol",
+  "formula": "CH3OH",
+  "mw": 32.04,
+  "form": "liquid",
+  "density": 0.792,
+  "purity": 99.9,
+  "solubility": null,
+  "hazards": "Highly flammable and toxic if swallowed, inhaled or absorbed.",
+  "storage": "Room temperature, flammables cabinet"
+ },
+ {
+  "id": 63,
+  "name": "2-Propanol (isopropanol)",
+  "formula": "C3H8O",
+  "mw": 60.1,
+  "form": "liquid",
+  "density": 0.786,
+  "purity": 99.5,
+  "solubility": null,
+  "hazards": "Highly flammable; eye irritant.",
+  "storage": "Room temperature, flammables cabinet"
+ },
+ {
+  "id": 64,
+  "name": "Acetone",
+  "formula": "C3H6O",
+  "mw": 58.08,
+  "form": "liquid",
+  "density": 0.791,
+  "purity": 99.5,
+  "solubility": null,
+  "hazards": "Highly flammable; eye irritant.",
+  "storage": "Room temperature, flammables cabinet"
+ },
+ {
+  "id": 65,
+  "name": "Glycerol",
+  "formula": "C3H8O3",
+  "mw": 92.09,
+  "form": "liquid",
+  "density": 1.261,
+  "purity": 99,
+  "solubility": null,
+  "hazards": "Low hazard. Viscous; use positive-displacement pipetting or weigh.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 66,
+  "name": "DMSO",
+  "formula": "C2H6OS",
+  "mw": 78.13,
+  "form": "liquid",
+  "density": 1.1,
+  "purity": 99.9,
+  "solubility": null,
+  "hazards": "Penetrates skin and can carry dissolved substances with it. Wear gloves.",
+  "storage": "Room temperature, dry"
+ },
+ {
+  "id": 67,
+  "name": "2-Mercaptoethanol",
+  "formula": "C2H6OS",
+  "mw": 78.13,
+  "form": "liquid",
+  "density": 1.114,
+  "purity": 99,
+  "solubility": null,
+  "hazards": "Toxic, corrosive, strong odor. Use in a fume hood.",
+  "storage": "4 °C, tightly closed"
+ },
+ {
+  "id": 68,
+  "name": "Triton X-100",
+  "formula": "(C2H4O)nC14H22O",
+  "mw": 625,
+  "form": "liquid",
+  "density": 1.07,
+  "purity": 100,
+  "solubility": null,
+  "hazards": "Harmful if swallowed; causes serious eye damage; toxic to aquatic life. Average MW; viscous.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 69,
+  "name": "Tween 20",
+  "formula": "polysorbate 20",
+  "mw": 1227.54,
+  "form": "liquid",
+  "density": 1.095,
+  "purity": 100,
+  "solubility": null,
+  "hazards": "Low hazard. Viscous; weigh or use wide-bore tips.",
+  "storage": "Room temperature"
+ },
+ {
+  "id": 70,
+  "name": "TEMED",
+  "formula": "C6H16N2",
+  "mw": 116.21,
+  "form": "liquid",
+  "density": 0.775,
+  "purity": 99,
+  "solubility": null,
+  "hazards": "Highly flammable; harmful; corrosive. Use in a fume hood.",
+  "storage": "Room temperature, flammables cabinet"
+ }
+];
+
+return { REAGENTS };
+})();
+const __m_js_state_js = (() => {
+const { createStore } = __m_js_store_js;
+const { REAGENTS } = __m_js_reagents_js;
+// The one shared store, plus reagent lookups that include the user's own reagents.
+
+
+const store = createStore();
+
+const allReagents = () => [...REAGENTS, ...store.customReagents()];
+
+function findReagentByName(name) {
+  const q = String(name || '').trim().toLowerCase();
+  return q ? allReagents().find((r) => r.name.toLowerCase() === q) || null : null;
+}
+
+// Safety text for an ingredient, from the library entry it came from (matched by id, then by name).
+function hazardsFor(ingredient) {
+  const list = allReagents();
+  const hit = list.find((r) => String(r.id) === String(ingredient.reagentId)) || list.find((r) => r.name === ingredient.name);
+  return hit && hit.hazards ? hit.hazards : '';
+}
+
+const go = (hash) => { location.hash = hash; };
+
+return { store, allReagents, findReagentByName, hazardsFor, go };
+})();
+const __m_js_starters_js = (() => {
+
+// Starter recipes. Reagent names match the built-in library.
+const STARTERS = [
+  { name: '1× PBS, pH 7.4', ph: 7.4, shelf: 180, steps: 'Add about 80% of the final volume of water.\nDissolve each ingredient in turn.\nCheck the pH and adjust with HCl or NaOH.\nMake up to the final volume.\nAutoclave or filter-sterilise.',
+    ing: [['Sodium chloride', 137, 'mM'], ['Potassium chloride', 2.7, 'mM'], ['Sodium phosphate dibasic (anhydrous)', 10, 'mM'], ['Potassium phosphate monobasic', 1.8, 'mM']] },
+  { name: '1× TAE', ph: 8.3, shelf: 365, steps: 'Add about 80% of the final volume of water.\nDissolve the Tris and EDTA, then add the acetic acid.\nMake up to the final volume.',
+    ing: [['Tris base', 40, 'mM'], ['Acetic acid (glacial)', 20, 'mM'], ['EDTA disodium dihydrate', 1, 'mM']] },
+  { name: '1× TBE', ph: 8.3, shelf: 365, steps: 'Add about 80% of the final volume of water.\nDissolve everything.\nMake up to the final volume.',
+    ing: [['Tris base', 89, 'mM'], ['Boric acid', 89, 'mM'], ['EDTA disodium dihydrate', 2, 'mM']] },
+  { name: '1× SDS-PAGE running buffer', ph: null, shelf: 90, steps: 'Add about 80% of the final volume of water.\nDissolve the Tris and glycine.\nAdd the SDS last, to avoid foaming.\nMake up to the final volume. Do not adjust the pH.',
+    ing: [['Tris base', 25, 'mM'], ['Glycine', 192, 'mM'], ['Sodium dodecyl sulfate (SDS)', 0.1, '% w/v']] },
+  { name: '10% SDS stock', ph: null, shelf: 365, steps: 'Wear a mask when weighing SDS powder.\nDissolve with gentle warming and stirring.\nMake up to the final volume. Do not autoclave.',
+    ing: [['Sodium dodecyl sulfate (SDS)', 10, '% w/v']] },
+];
+
+function starterToRecipe(s, library) {
+  const ingredients = s.ing.map(([name, conc, unit]) => {
+    const r = library.find((x) => x.name === name);
+    return r ? { reagentId: String(r.id), name: r.name, mw: r.mw, form: r.form, density: r.density, purity: r.purity, solubility: r.solubility, conc, unit, note: '' } : null;
+  });
+  if (ingredients.some((i) => i === null)) return null;
+  return { name: s.name, description: 'Starter recipe. Check it against your own protocol.', finalVolumeMl: 1000, ph: s.ph, shelfLifeDays: s.shelf, steps: s.steps, ingredients };
+}
+
+return { STARTERS, starterToRecipe };
+})();
+const __m_js_bench_js = (() => {
+const { recipeLines, bestUnit, fmt, MASS, VOL, CONC } = __m_js_calc_js;
+// Pure maths for Bench Mode, form swapping and sharing. No DOM, no storage.
+
+// ---------- planning a batch ----------
+// `overrides` maps an ingredient index to replacement fields (used by "swap form").
+function planBatch(recipe, volumeMl, overrides = {}) {
+  const ingredients = recipe.ingredients.map((ing, i) => (overrides[i] ? { ...ing, ...overrides[i] } : ing));
+  const res = recipeLines(ingredients, volumeMl / 1000);
+  if (res.error) return { error: res.error, ingredients, lines: [], waterL: 0, warnings: [], volumeMl };
+  return { ...res, ingredients, volumeMl, ready: res.lines.every((l) => l.amount !== null) && res.waterL >= 0 };
+}
+
+// ---------- weighing feedback ----------
+const band = (target, tolPct) => ({ lo: target * (1 - tolPct / 100), hi: target * (1 + tolPct / 100) });
+const deviationPct = (target, actual) => ((actual - target) / target) * 100;
+
+// "+2.31%", "-0.40%", "0.0%": never "-0.0%" or an exponent from rounding noise.
+function fmtPct(dev) {
+  if (!Number.isFinite(dev) || Math.abs(dev) < 0.005) return '0.0%';
+  return `${dev > 0 ? '+' : ''}${dev.toFixed(Math.abs(dev) < 10 ? 2 : 1)}%`;
+}
+
+// perfect: within a quarter of the tolerance; ok: within tolerance; near: up to double it; off: beyond.
+function grade(devPct, tolPct) {
+  const d = Math.abs(devPct);
+  if (d <= tolPct / 4) return 'perfect';
+  if (d <= tolPct) return 'ok';
+  if (d <= tolPct * 2) return 'near';
+  return 'off';
+}
+
+// ---------- "Oops-proof" fixes ----------
+// Every amount in a batch is proportional to its final volume, so for each ingredient already weighed there is one
+// final volume at which that ingredient would be exactly right: k = actual / (target / volume).
+function exactVolumeFor(volumeMl, target, actual) {
+  return (volumeMl * actual) / target;
+}
+
+// The single final volume that makes the worst deviation among all weighed ingredients as small as possible.
+// Deviation at volume V is k/V - 1, so the best compromise sits halfway between the smallest and largest k.
+function balancedVolume(volumeMl, weighed) {
+  const ks = weighed.map((w) => exactVolumeFor(volumeMl, w.target, w.actual));
+  return (Math.min(...ks) + Math.max(...ks)) / 2;
+}
+
+// Deviations of already-weighed ingredients if the batch were made up to `newVolumeMl` instead.
+function devsAtVolume(volumeMl, newVolumeMl, weighed) {
+  return weighed.map((w) => deviationPct((w.target * newVolumeMl) / volumeMl, w.actual));
+}
+const worstDev = (devs) => devs.reduce((m, d) => (Math.abs(d) > Math.abs(m) ? d : m), 0);
+
+// Concentration actually achieved for one ingredient, given what was weighed and the final volume.
+function achievedConc(ing, target, actual, planVolumeMl, finalVolumeMl) {
+  const value = ing.conc * (actual / target) * (planVolumeMl / finalVolumeMl);
+  return { value, unit: ing.unit };
+}
+
+// Round a volume for people: two decimals under 100 mL, one decimal above.
+const niceVolume = (ml) => (ml < 100 ? Math.round(ml * 100) / 100 : Math.round(ml * 10) / 10);
+
+// ---------- amounts for display ----------
+function amountUnits(line) {
+  return line.kind === 'volume' ? VOL : MASS;
+}
+function displayAmount(line, amount = line.amount) {
+  const b = bestUnit(amount, amountUnits(line));
+  return { value: b.value, unit: b.unit, text: `${fmt(b.value)} ${b.unit}` };
+}
+function toBase(line, value, unit) {
+  return value * amountUnits(line)[unit];
+}
+
+// ---------- swap form (hydrate / anhydrous) ----------
+// Only forms that are the same compound with a different amount of water. Salts of different compounds are NOT here.
+const FORM_GROUPS = [
+  ['Magnesium chloride hexahydrate', 'Magnesium chloride (anhydrous)'],
+  ['Calcium chloride dihydrate', 'Calcium chloride (anhydrous)'],
+  ['Sodium phosphate dibasic (anhydrous)', 'Sodium phosphate dibasic heptahydrate'],
+  ['Sodium phosphate monobasic (anhydrous)', 'Sodium phosphate monobasic monohydrate'],
+  ['Sodium acetate (anhydrous)', 'Sodium acetate trihydrate'],
+  ['Citric acid (anhydrous)', 'Citric acid monohydrate'],
+  ['MES monohydrate', 'MES (free acid)'],
+];
+
+// Other forms of the same compound, for an ingredient given as a molar concentration.
+function equivalents(ingredient, library) {
+  if (!(ingredient.unit in CONC)) return []; // % w/v etc. describe mass of the compound as weighed: do not guess
+  const group = FORM_GROUPS.find((g) => g.includes(ingredient.name));
+  if (!group) return [];
+  return group.filter((n) => n !== ingredient.name).map((n) => library.find((r) => r.name === n)).filter(Boolean);
+}
+
+function swapFields(reagent) {
+  return { reagentId: String(reagent.id), name: reagent.name, mw: reagent.mw, form: reagent.form, density: reagent.density, purity: reagent.purity, solubility: reagent.solubility };
+}
+
+// ---------- plain text (share / copy) ----------
+function recipeText(recipe, plan, labName = '') {
+  const out = [];
+  out.push(recipe.name + (labName ? ` (${labName})` : ''));
+  out.push(`Make ${fmt(plan.volumeMl)} mL${recipe.ph ? `, pH ${recipe.ph}` : ''}`);
+  out.push('');
+  plan.lines.forEach((l, i) => {
+    const amt = l.amount === null ? 'amount unknown' : displayAmount(l).text;
+    out.push(`- ${l.name}: ${amt}  (${plan.ingredients[i].conc} ${plan.ingredients[i].unit})`);
+  });
+  if (plan.waterL >= 0) out.push(`- Water: to ${fmt(plan.volumeMl)} mL final volume`);
+  if (recipe.steps) {
+    out.push('');
+    out.push('Method:');
+    recipe.steps.split('\n').map((s) => s.trim()).filter(Boolean).forEach((s, n) => out.push(`${n + 1}. ${s}`));
+  }
+  out.push('');
+  out.push('Made with LabKit Recipes. Check amounts against your own protocol.');
+  return out.join('\n');
+}
+
+// One method step per line; blank lines ignored.
+const methodSteps = (steps) => (steps || '').split('\n').map((s) => s.trim()).filter(Boolean);
+
+return { planBatch, band, deviationPct, fmtPct, grade, exactVolumeFor, balancedVolume, devsAtVolume, worstDev, achievedConc, niceVolume, amountUnits, displayAmount, toBase, FORM_GROUPS, equivalents, swapFields, recipeText, methodSteps };
+})();
+const __m_js_pages_recipes_js = (() => {
+const { h, icon, toast, fmtDate, download, confirmSheet } = __m_js_ui_js;
+const { store, go } = __m_js_state_js;
+const { STARTERS, starterToRecipe } = __m_js_starters_js;
+const { REAGENTS } = __m_js_reagents_js;
+const { methodSteps } = __m_js_bench_js;
+
+
+
+
+
+const DAY = 86400000;
+
+function renderRecipes(ctx) {
+  const el = h('div');
+  const search = h('input', { type: 'search', placeholder: 'Search recipes', 'aria-label': 'Search recipes', autocomplete: 'off' });
+  const list = h('div', { class: 'list' });
+  const top = h('div');
+
+  function addStarters() {
+    let added = 0;
+    for (const s of STARTERS) {
+      const rec = starterToRecipe(s, REAGENTS);
+      if (rec && !store.recipes().some((r) => r.name === rec.name)) { store.saveRecipe(rec); added++; }
+    }
+    store.setFlag('welcomed', true);
+    toast(added ? `Added ${added} starter recipes. Tap one to try it.` : 'The starter recipes are already here.');
+    ctx.rerender();
+  }
+
+  function drawTop() {
+    top.replaceChildren();
+    const active = store.activeBench();
+    if (active) {
+      const total = active.recipe.ingredients.length + 2;
+      top.append(h('div', { class: 'card welcome' },
+        h('h2', null, 'Batch in progress'),
+        h('p', null, `${active.recipe.name}, ${active.volumeMl} mL. Step ${Math.min(active.step + 1, total)} of ${total}.`),
+        h('div', { class: 'row' },
+          h('a', { class: 'btn primary', href: '#/bench' }, icon('play', 18), 'Resume'),
+          h('button', { type: 'button', class: 'btn danger', onclick: async () => { if (await confirmSheet({ title: 'Discard this batch?', message: 'The weights you entered so far will be lost.', confirmLabel: 'Discard', danger: true })) { store.clearActiveBench(); ctx.rerender(); } } }, 'Discard'))));
+    }
+    if (!store.recipes().length) {
+      top.append(h('div', { class: 'card welcome' },
+        h('h2', null, 'Make solutions with fewer mistakes'),
+        h('p', null, 'Scale any recipe to the volume you need, weigh with live feedback, fix an overshoot in one tap, and keep a record with a printable label.'),
+        h('div', { class: 'row-stack' },
+          h('button', { type: 'button', class: 'btn primary', onclick: addStarters }, 'Add starter recipes (PBS, TAE, TBE…)'),
+          h('a', { class: 'btn', href: '#/quick' }, icon('quick', 18), 'Quick make one solution'),
+          h('a', { class: 'btn', href: '#/recipe/new' }, 'Write my own recipe')),
+        h('p', { class: 'hint', style: 'margin-top:10px' }, 'Everything stays on this device. No account, no sign-up.')));
+    }
+    // A gentle nudge to back up, because the data lives only on this device.
+    const last = store.lastBackup();
+    const age = last ? (Date.now() - Date.parse(last)) / DAY : Infinity;
+    const oldest = Math.min(...store.recipes().map((r) => Date.parse(r.createdAt)), Date.now());
+    const worthProtecting = store.stats().batches >= 1 || (Date.now() - oldest) / DAY > 7;
+    if (worthProtecting && age > 30) {
+      top.append(h('div', { class: 'note info' }, last ? `Your last backup was ${Math.floor(age)} days ago. ` : 'You have not backed up yet. ',
+        h('a', { href: '#/settings' }, 'Back up now'), ' so a cleared browser cannot take your recipes with it.'));
+    }
+    if (!store.persistent) top.append(h('div', { class: 'note bad' }, 'Your browser is not letting this page save data (a private window, or storage is blocked). Your work will be lost when you close it.'));
+    if (store.recovered) top.append(h('div', { class: 'note bad' }, 'Saved data could not be read, so the app started fresh. A copy of the damaged data was kept in your browser.'));
+  }
+
+  function drawList() {
+    const q = search.value.trim().toLowerCase();
+    const rows = store.recipes().filter((r) => !q || r.name.toLowerCase().includes(q) || r.ingredients.some((i) => i.name.toLowerCase().includes(q)));
+    list.replaceChildren(...rows.map((r) => h('a', { class: 'item', href: `#/recipe/${r.id}` },
+      h('div', { class: 'title' }, r.name),
+      h('div', { class: 'sub' }, [`${r.ingredients.length} ingredient${r.ingredients.length === 1 ? '' : 's'}`, r.ph ? `pH ${r.ph}` : null, r.lastMadeAt ? `last made ${fmtDate(r.lastMadeAt)}` : 'not made yet'].filter(Boolean).join(' · ')))));
+    if (store.recipes().length && !rows.length) list.append(h('p', { class: 'muted' }, 'No recipes match that search.'));
+  }
+
+  search.addEventListener('input', drawList);
+  drawTop();
+  drawList();
+  el.append(top, store.recipes().length > 4 ? h('div', { class: 'search' }, search) : null, list, store.recipes().length ? h('a', { class: 'fab', href: '#/recipe/new', 'aria-label': 'New recipe' }, icon('plus', 28)) : null);
+  return { title: 'LabKit Recipes', el };
+}
+
+const stepCount = (steps) => methodSteps(steps).length;
+
+return { renderRecipes, stepCount };
+})();
+const __m_js_pages_recipe_js = (() => {
+const { h, icon, toast, numOf, numInput, openSheet, confirmSheet, shareOrCopy, fmtDate, expiryBadge } = __m_js_ui_js;
+const { fmt } = __m_js_calc_js;
+const { store, go, allReagents } = __m_js_state_js;
+const { planBatch, displayAmount, equivalents, swapFields, recipeText, methodSteps } = __m_js_bench_js;
+
+
+
+
+const PRESETS = [50, 100, 250, 500, 1000, 2000];
+const stepFor = (v) => (v < 100 ? 10 : v < 1000 ? 50 : 100);
+
+function startBench(recipe, volumeMl, overrides) {
+  store.setActiveBench({
+    recipeId: recipe.id,
+    recipe: { name: recipe.name, description: recipe.description, finalVolumeMl: recipe.finalVolumeMl, ph: recipe.ph, shelfLifeDays: recipe.shelfLifeDays, steps: recipe.steps, ingredients: JSON.parse(JSON.stringify(recipe.ingredients)), version: recipe.version },
+    volumeMl, overrides: { ...overrides }, step: 0, actuals: {}, units: {}, stepsDone: [], notes: '', startedAt: new Date().toISOString(),
+  });
+  go('#/bench');
+}
+
+function renderRecipe(ctx) {
+  const recipe = store.getRecipe(ctx.params.id);
+  if (!recipe) return { title: 'Not found', back: '#/', el: h('div', { class: 'card' }, h('h2', null, 'Recipe not found'), h('p', { class: 'muted' }, 'It may have been deleted.'), h('a', { class: 'btn primary', href: '#/' }, 'Back to recipes')) };
+  const isTemp = recipe.id === 'temp';
+  let vol = Number(ctx.query.vol) > 0 ? Number(ctx.query.vol) : recipe.finalVolumeMl;
+  const overrides = {};
+  const el = h('div');
+
+  // ----- volume controls (built once so typing never loses focus) -----
+  const input = numInput({ 'aria-label': 'Volume in millilitres', value: String(vol) });
+  const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Common volumes' });
+  const results = h('div');
+  const setVol = (v) => { vol = Math.min(1e6, Math.max(0.1, v)); input.value = String(Math.round(vol * 100) / 100); drawResults(); };
+  const drawChips = () => chips.replaceChildren(...PRESETS.map((p) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(p === vol), onclick: () => setVol(p) }, p >= 1000 ? `${p / 1000} L` : `${p} mL`)));
+  input.addEventListener('input', () => { const v = numOf(input); if (v > 0) { vol = v; drawResults(); } });
+  const volumeBlock = h('div', { class: 'card' },
+    h('div', { class: 'field-label' }, 'How much do you want to make?'),
+    h('div', { class: 'stepper' },
+      h('button', { type: 'button', class: 'btn', 'aria-label': 'Less', onclick: () => setVol(vol - stepFor(vol)) }, icon('minus')),
+      input,
+      h('button', { type: 'button', class: 'btn', 'aria-label': 'More', onclick: () => setVol(vol + stepFor(vol)) }, icon('plus'))),
+    h('div', { class: 'hint', style: 'text-align:center' }, 'millilitres (1000 mL = 1 L)'),
+    chips);
+
+  function swapSheet(i, plan) {
+    const ing = recipe.ingredients[i];
+    const options = equivalents(overrides[i] ? { ...ing, ...overrides[i] } : ing, allReagents()).concat(overrides[i] ? [allReagents().find((r) => r.name === ing.name)].filter(Boolean) : []);
+    const sheet = openSheet({
+      title: 'Which form do you have?',
+      body: h('div', null,
+        h('p', { class: 'muted' }, 'Same amount of the compound, different weight on the balance because of the water it carries. This only changes this batch.'),
+        ...options.map((o) => h('button', { type: 'button', class: 'option', onclick: () => {
+          if (o.name === ing.name) delete overrides[i]; else overrides[i] = swapFields(o);
+          sheet.close();
+          drawResults();
+        } }, h('b', null, o.name), h('span', null, `molecular weight ${o.mw} g/mol`)))),
+    });
+  }
+
+  function drawResults() {
+    drawChips();
+    const plan = planBatch(recipe, vol, overrides);
+    const kids = [];
+    if (plan.error) kids.push(h('div', { class: 'note bad' }, plan.error));
+    else {
+      const rows = plan.lines.map((l, i) => {
+        const ing = plan.ingredients[i];
+        const alts = equivalents(ing, allReagents());
+        const swapped = !!overrides[i];
+        return h('div', { class: `amt ${l.warnings.length ? 'warn' : ''}` },
+          h('div', null,
+            h('div', { class: 'name' }, l.name),
+            h('div', { class: 'conc' }, `${ing.conc} ${ing.unit}${l.note ? ` · ${l.note}` : ''}`),
+            l.warnings.map((w) => h('div', { class: 'hint', style: 'color:var(--warn)' }, w)),
+            (alts.length || swapped) ? h('div', { class: 'tools' }, h('button', { type: 'button', class: 'btn small', onclick: () => swapSheet(i, plan) }, swapped ? 'Form swapped: change' : 'Swap form')) : null),
+          h('div', { class: 'num' }, l.amount === null ? '—' : displayAmount(l).text));
+      });
+      kids.push(h('div', { class: 'amounts' }, rows,
+        h('div', { class: 'amt' }, h('div', null, h('div', { class: 'name' }, 'Water'), h('div', { class: 'conc' }, 'add last, up to the final volume')), h('div', { class: 'num' }, plan.waterL >= 0 ? `to ${fmt(vol)} mL` : '—'))));
+      plan.warnings.forEach((w) => kids.push(h('div', { class: 'note bad' }, w)));
+      if (!plan.ready) kids.push(h('div', { class: 'note bad' }, 'Some amounts cannot be calculated. Edit the recipe and check the highlighted ingredients.'));
+      if (Object.keys(overrides).length) kids.push(h('div', { class: 'note info' }, 'Using a different form of the same compound: the number of moles is unchanged.'));
+    }
+    const steps = methodSteps(recipe.steps);
+    if (steps.length) kids.push(h('div', { class: 'card', style: 'margin-top:12px' }, h('h3', null, 'Method'), h('ol', { style: 'margin:0;padding-left:20px' }, steps.map((s) => h('li', { style: 'margin:4px 0' }, s)))));
+    const recent = isTemp ? [] : store.batches().filter((b) => b.recipeId === recipe.id).slice(0, 3);
+    if (recent.length) kids.push(h('div', { class: 'card' }, h('h3', null, 'Recently made'), h('div', { class: 'list' }, recent.map((b) => h('a', { class: 'item', href: `#/batch/${b.id}` }, h('div', { class: 'title' }, `${b.number}: ${fmt(b.volumeMl)} mL`), h('div', { class: 'sub' }, fmtDate(b.madeAt)), expiryBadge(b.expiresAt))))));
+    results.replaceChildren(...kids);
+    makeBtn.disabled = !(plan.ready);
+  }
+
+  async function makeIt() {
+    const active = store.activeBench();
+    if (active && active.recipeId !== recipe.id && !(await confirmSheet({ title: 'Replace the batch in progress?', message: `You are part-way through "${active.recipe.name}". Starting this one will discard it.`, confirmLabel: 'Start new batch', danger: true }))) return;
+    startBench(recipe, vol, overrides);
+  }
+  const makeBtn = h('button', { type: 'button', class: 'btn primary', onclick: makeIt }, icon('play', 18), 'Make it');
+  const shareBtn = h('button', { type: 'button', class: 'btn', onclick: async () => {
+    const r = await shareOrCopy({ title: recipe.name, text: recipeText(recipe, planBatch(recipe, vol, overrides), store.settings().labName) });
+    if (r === 'copied') toast('Copied. Paste it into a message or note.'); else if (r === 'failed') toast('Could not share or copy.', { kind: 'error' });
+  } }, icon('share', 18), 'Share');
+
+  // ----- the "more" sheet: duplicate, history, delete -----
+  function moreSheet() {
+    const sheet = openSheet({
+      title: recipe.name,
+      body: h('div', { class: 'row-stack' },
+        h('a', { class: 'btn', href: `#/recipe/${recipe.id}/edit`, onclick: () => sheet.close() }, icon('edit', 18), 'Edit recipe'),
+        h('button', { type: 'button', class: 'btn', onclick: () => { const c = store.duplicateRecipe(recipe.id); sheet.close(); toast('Duplicated.'); go(`#/recipe/${c.id}`); } }, icon('copy', 18), 'Duplicate'),
+        h('button', { type: 'button', class: 'btn', onclick: () => { sheet.close(); historySheet(); } }, icon('history', 18), `Version history (v${recipe.version})`),
+        h('button', { type: 'button', class: 'btn danger', onclick: async () => {
+          sheet.close();
+          if (!(await confirmSheet({ title: 'Delete this recipe?', message: 'Batch records you made from it are kept.', confirmLabel: 'Delete', danger: true }))) return;
+          const gone = store.deleteRecipe(recipe.id);
+          go('#/');
+          toast(`Deleted "${gone.name}".`, { action: 'Undo', onAction: () => { store.undeleteRecipe(gone); go(`#/recipe/${gone.id}`); } });
+        } }, icon('trash', 18), 'Delete')),
+    });
+  }
+  function historySheet() {
+    const hist = recipe.history || [];
+    const sheet = openSheet({
+      title: 'Version history',
+      body: h('div', null,
+        h('p', { class: 'muted' }, 'Restoring an old version saves it as a new version. Nothing is ever lost.'),
+        h('div', { class: 'card' }, h('b', null, `v${recipe.version} (current)`), h('div', { class: 'hint' }, fmtDate(recipe.updatedAt))),
+        ...hist.map((x) => h('div', { class: 'card' }, h('b', null, `v${x.version}`), h('div', { class: 'hint' }, `${fmtDate(x.savedAt)} · ${x.snapshot.ingredients.length} ingredients`),
+          h('button', { type: 'button', class: 'btn small', style: 'margin-top:8px', onclick: () => { store.restoreVersion(recipe.id, x.version); sheet.close(); toast(`Restored v${x.version} as a new version.`); ctx.rerender(); } }, 'Restore this version'))),
+        hist.length ? null : h('p', { class: 'muted' }, 'No earlier versions yet. Each time you edit and save, the old one is kept here.')),
+    });
+  }
+
+  el.append(
+    recipe.description ? h('p', { class: 'muted' }, recipe.description) : null,
+    h('div', { class: 'row', style: 'margin-bottom:10px' }, recipe.ph ? h('span', { class: 'badge' }, `pH ${recipe.ph}`) : null, recipe.shelfLifeDays ? h('span', { class: 'badge' }, `Keeps ${recipe.shelfLifeDays} days`) : null, h('span', { class: 'badge' }, `v${recipe.version}`)),
+    volumeBlock, results,
+    h('div', { class: 'actionbar' }, shareBtn, makeBtn));
+  drawResults();
+
+  const actions = isTemp
+    ? [h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Save as recipe', onclick: () => { const r = store.saveRecipe({ ...recipe, name: recipe.name }); toast('Saved to your recipes.'); go(`#/recipe/${r.id}`); } }, icon('plus'))]
+    : [h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'More actions', onclick: moreSheet }, icon('more'))];
+  return { title: recipe.name, back: isTemp ? '#/quick' : '#/', actions, el };
+}
+
+return { startBench, renderRecipe };
+})();
+const __m_js_ing_form_js = (() => {
+const { RECIPE_UNITS } = __m_js_calc_js;
+const { h, icon, field, numInput, selectEl } = __m_js_ui_js;
+const { allReagents, findReagentByName } = __m_js_state_js;
+// One ingredient as a phone-friendly card. Used by the recipe editor and by Quick make.
+
+
+
+const blankRow = () => ({ reagentId: null, name: '', mw: '', form: 'solid', density: '', purity: '', solubility: '', conc: '', unit: 'mM', note: '', _open: false });
+
+const rowFromIngredient = (i) => ({ reagentId: i.reagentId ?? null, name: i.name, mw: i.mw ?? '', form: i.form, density: i.density ?? '', purity: i.purity ?? '', solubility: i.solubility ?? '', conc: i.conc, unit: i.unit, note: i.note || '', _open: false });
+
+// What the store expects (numbers, or null when blank).
+function rowToIngredient(r) {
+  const n = (v) => (v === '' || v === null || v === undefined ? null : Number(String(v).replace(',', '.')));
+  return { reagentId: r.reagentId, name: r.name, mw: n(r.mw), form: r.form, density: n(r.density), purity: n(r.purity), solubility: n(r.solubility), conc: n(r.conc), unit: r.unit, note: r.note };
+}
+
+function reagentDatalist(id = 'reagent-list') {
+  return h('datalist', { id }, allReagents().map((r) => h('option', { value: r.name }, r.formula || '')));
+}
+
+const needsDetails = (r) => r._open === true || (r.name.trim() !== '' && !r.reagentId);
+
+function ingredientCard(row, { onRemove, onChange = () => {}, listId = 'reagent-list', redraw }) {
+  const caption = h('div', { class: 'hint' });
+  const details = h('div', { class: 'card', style: 'background:var(--bg);box-shadow:none;margin:10px 0 0' });
+  const toggle = h('button', { type: 'button', class: 'btn small', 'aria-expanded': 'false' }, 'Details');
+  const sync = () => {
+    if (row.reagentId) caption.textContent = `From the library: molecular weight ${row.mw || '?'} g/mol, ${row.form}.`;
+    else if (row.name.trim()) caption.textContent = 'Not in the library. Open Details and enter its molecular weight (it is on the bottle).';
+    else caption.textContent = 'Start typing a name, then choose it from the list.';
+    const open = needsDetails(row);
+    details.classList.toggle('hidden', !open);
+    toggle.setAttribute('aria-expanded', String(open));
+  };
+
+  const name = h('input', { type: 'text', list: listId, placeholder: 'e.g. Sodium chloride', autocomplete: 'off', autocapitalize: 'sentences', 'aria-label': 'Ingredient', value: row.name });
+  name.addEventListener('input', () => {
+    row.name = name.value;
+    const lib = findReagentByName(name.value);
+    if (lib) {
+      Object.assign(row, { reagentId: String(lib.id), name: lib.name, mw: lib.mw ?? '', form: lib.form, density: lib.density ?? '', purity: lib.purity ?? '', solubility: lib.solubility ?? '' });
+      if (redraw) { redraw(); return; } // refresh the details fields with the library values
+    } else if (row.reagentId) row.reagentId = null; // typed over a library name: now a custom ingredient
+    sync();
+    onChange();
+  });
+
+  const amount = numInput({ placeholder: 'Amount', 'aria-label': 'Amount', value: row.conc === null || row.conc === undefined ? '' : row.conc });
+  amount.addEventListener('input', () => { row.conc = amount.value; onChange(); });
+  const unit = selectEl(RECIPE_UNITS, row.unit, { 'aria-label': 'Unit' });
+  unit.addEventListener('change', () => { row.unit = unit.value; onChange(); });
+
+  const bind = (key, el, ev = 'input') => { el.addEventListener(ev, () => { row[key] = el.value; onChange(); }); return el; };
+  const form = bind('form', selectEl(['solid', 'liquid'], row.form), 'change');
+  details.append(
+    h('div', { class: 'two' }, field('Molecular weight (g/mol)', bind('mw', numInput({ value: row.mw }))), field('Form', form)),
+    h('div', { class: 'two' }, field('Density (g/mL, liquids)', bind('density', numInput({ value: row.density }))), field('Purity (%)', bind('purity', numInput({ value: row.purity })))),
+    field('Note', bind('note', h('input', { type: 'text', maxlength: 200, value: row.note || '' }))),
+  );
+  toggle.addEventListener('click', () => { row._open = !needsDetails(row); sync(); });
+
+  const el = h('div', { class: 'card' },
+    field('Ingredient', name),
+    h('div', { class: 'with-unit' }, amount, unit),
+    caption,
+    h('div', { class: 'row', style: 'margin-top:8px' }, toggle, onRemove ? h('button', { type: 'button', class: 'btn small danger', onclick: onRemove }, icon('trash', 18), 'Remove') : null),
+    details);
+  sync();
+  return el;
+}
+
+return { blankRow, rowFromIngredient, rowToIngredient, reagentDatalist, ingredientCard };
+})();
+const __m_js_pages_recipe_edit_js = (() => {
+const { h, toast, field, numInput, numOf } = __m_js_ui_js;
+const { store, go } = __m_js_state_js;
+const { ValidationError } = __m_js_store_js;
+const { blankRow, rowFromIngredient, rowToIngredient, reagentDatalist, ingredientCard } = __m_js_ing_form_js;
+
+
+
+
+function renderRecipeEdit(ctx) {
+  const id = ctx.params.id || null;
+  const existing = id ? store.getRecipe(id) : null;
+  if (id && !existing) return { title: 'Not found', back: '#/', el: h('div', { class: 'card' }, h('h2', null, 'Recipe not found'), h('a', { class: 'btn primary', href: '#/' }, 'Back to recipes')) };
+
+  const rows = existing ? existing.ingredients.map(rowFromIngredient) : [blankRow()];
+  const name = h('input', { type: 'text', maxlength: 120, placeholder: 'e.g. 1× PBS, pH 7.4', autocapitalize: 'sentences', value: existing ? existing.name : '' });
+  const volume = numInput({ value: existing ? existing.finalVolumeMl : 1000 });
+  const ph = numInput({ value: existing && existing.ph !== null ? existing.ph : '' });
+  const shelf = numInput({ value: existing && existing.shelfLifeDays ? existing.shelfLifeDays : '' });
+  const description = h('input', { type: 'text', maxlength: 1000, placeholder: 'Optional', value: existing ? existing.description : '' });
+  const steps = h('textarea', { maxlength: 5000, placeholder: 'One step per line, for example:\nAdd about 80% of the final volume of water.\nDissolve everything.\nCheck the pH.\nMake up to the final volume.' }, existing ? existing.steps : '');
+  const list = h('div');
+  const error = h('div', { class: 'note bad hidden', role: 'alert' });
+
+  function drawRows() {
+    list.replaceChildren(...rows.map((r, i) => ingredientCard(r, {
+      redraw: drawRows,
+      onRemove: rows.length > 1 ? () => { rows.splice(i, 1); drawRows(); } : null,
+    })));
+  }
+  drawRows();
+
+  function save() {
+    error.classList.add('hidden');
+    try {
+      const body = {
+        name: name.value, description: description.value, finalVolumeMl: numOf(volume), ph: numOf(ph), shelfLifeDays: numOf(shelf), steps: steps.value,
+        ingredients: rows.map(rowToIngredient),
+      };
+      if ([body.finalVolumeMl, body.ph, body.shelfLifeDays].some(Number.isNaN)) throw new ValidationError('Check the volume, pH and shelf life: they must be numbers.');
+      const saved = store.saveRecipe(body, id);
+      toast(existing ? `Saved as version ${saved.version}.` : 'Recipe saved.');
+      go(`#/recipe/${saved.id}`);
+    } catch (e) {
+      if (!(e instanceof ValidationError)) throw e;
+      error.textContent = e.message;
+      error.classList.remove('hidden');
+      error.scrollIntoView({ block: 'center' });
+    }
+  }
+
+  const el = h('div', null,
+    reagentDatalist(),
+    h('div', { class: 'card' },
+      field('Name', name),
+      h('div', { class: 'two' }, field('Usual volume (mL)', volume), field('Target pH', ph)),
+      field('Keeps for (days)', shelf, 'Sets the expiry date on the label.'),
+      field('Description', description)),
+    h('h2', { style: 'margin:16px 2px 8px' }, 'Ingredients'),
+    h('p', { class: 'muted small' }, 'For each one, say how much the finished solution should contain (for example 150 mM). The app works out the weights for any volume.'),
+    list,
+    h('button', { type: 'button', class: 'btn wide', onclick: () => { rows.push(blankRow()); drawRows(); list.lastElementChild.scrollIntoView({ block: 'center' }); } }, '+ Add ingredient'),
+    h('h2', { style: 'margin:16px 2px 8px' }, 'Method'),
+    field('Steps', steps, 'These become a checklist in Bench Mode.'),
+    error,
+    h('div', { class: 'actionbar' }, h('a', { class: 'btn', href: id ? `#/recipe/${id}` : '#/' }, 'Cancel'), h('button', { type: 'button', class: 'btn primary', onclick: save }, existing ? 'Save changes' : 'Save recipe')));
+  return { title: existing ? 'Edit recipe' : 'New recipe', back: id ? `#/recipe/${id}` : '#/', el };
+}
+
+return { renderRecipeEdit };
+})();
+const __m_js_pages_bench_js = (() => {
+const { h, icon, toast, numOf, numInput, selectEl, openSheet, confirmSheet, haptic } = __m_js_ui_js;
+const { fmt } = __m_js_calc_js;
+const { store, go, hazardsFor } = __m_js_state_js;
+const B = __m_js_bench_js;
+
+
+
+
+const GRADE_TEXT = { perfect: 'Spot on', ok: 'Within tolerance', near: 'A little off', off: 'Too far off' };
+
+function renderBench(ctx) {
+  const s = store.activeBench();
+  if (!s) return { title: 'Bench Mode', back: '#/', el: h('div', { class: 'card' }, h('h2', null, 'Nothing in progress'), h('p', { class: 'muted' }, 'Open a recipe and tap "Make it" to start.'), h('a', { class: 'btn primary', href: '#/' }, 'Go to recipes')) };
+
+  const tol = store.settings().tolerancePct;
+  const el = h('div');
+  const save = () => store.setActiveBench(s);
+  const plan = () => B.planBatch(s.recipe, s.volumeMl, s.overrides);
+  const nIng = () => plan().lines.length;
+  const total = () => nIng() + 2; // ingredients, then method, then review
+
+  // ----- helpers for amounts in the unit the person is weighing in -----
+  const unitsOf = (line) => Object.keys(B.amountUnits(line));
+  const unitFor = (i, line) => (s.units && s.units[i]) || B.displayAmount(line).unit;
+  const factor = (line, unit) => B.amountUnits(line)[unit];
+
+  function dots() {
+    const t = total();
+    return h('div', { class: 'bench-dots', role: 'img', 'aria-label': `Step ${s.step + 1} of ${t}` }, Array.from({ length: t }, (_, k) => h('i', { class: k < s.step ? 'done' : k === s.step ? 'now' : '' })));
+  }
+
+  // ----- an ingredient step -----
+  function ingredientStep(i) {
+    const p = plan();
+    const line = p.lines[i];
+    const ing = p.ingredients[i];
+    const target = line.amount;
+    const unit = unitFor(i, line);
+    const f = factor(line, unit);
+    const { lo, hi } = B.band(target, tol);
+    const haz = hazardsFor(ing);
+
+    const feedback = h('div', { class: 'feedback', 'aria-live': 'polite' }, 'Enter what the balance shows.');
+    const fixBtn = h('button', { type: 'button', class: 'btn wide hidden', style: 'margin-top:6px' }, icon('warn', 18), 'Fix it');
+    const unitSel = selectEl(unitsOf(line), unit, { 'aria-label': 'Unit' });
+    const input = numInput({ placeholder: '0', 'aria-label': `Amount of ${line.name} you ${line.kind === 'volume' ? 'measured' : 'weighed'}`, value: s.actuals[i] != null ? String(Math.round((s.actuals[i] / f) * 1e6) / 1e6) : '' });
+    const next = h('button', { type: 'button', class: 'btn primary', onclick: () => { s.step = i + 1; save(); draw(); window.scrollTo(0, 0); } }, 'Next', icon('back', 18));
+    next.lastChild.style.transform = 'rotate(180deg)';
+
+    const read = () => { const v = numOf(input); return v !== null && !Number.isNaN(v) && v > 0 ? v * factor(line, unitSel.value) : null; };
+    function update(announce) {
+      const a = read();
+      if (a === null) { delete s.actuals[i]; feedback.className = 'feedback'; feedback.textContent = 'Enter what the balance shows.'; fixBtn.classList.add('hidden'); next.disabled = true; save(); return; }
+      s.actuals[i] = a;
+      s.units = { ...(s.units || {}), [i]: unitSel.value };
+      save();
+      const dev = B.deviationPct(target, a);
+      const g = B.grade(dev, tol);
+      const diff = a - target;
+      const exactlyOn = Math.abs(diff) < target * 1e-6;
+      const diffText = exactlyOn ? 'exactly on target' : `${diff > 0 ? '+' : '−'}${fmt(Math.abs(diff) / factor(line, unitSel.value))} ${unitSel.value}`;
+      feedback.className = `feedback ${g}`;
+      feedback.replaceChildren(`${GRADE_TEXT[g]}`, h('small', null, `${B.fmtPct(dev)} (${diffText})`));
+      fixBtn.classList.toggle('hidden', g === 'perfect' || g === 'ok');
+      next.disabled = false;
+      if (announce && (g === 'perfect' || g === 'ok')) haptic(12);
+    }
+    input.addEventListener('input', () => update(false));
+    input.addEventListener('change', () => update(true));
+    unitSel.addEventListener('change', () => { const old = read(); update(false); if (old === null) return; });
+    fixBtn.addEventListener('click', () => fixSheet(i));
+    const exact = h('button', { type: 'button', class: 'btn small', onclick: () => { input.value = String(Math.round((target / factor(line, unitSel.value)) * 1e6) / 1e6); update(true); } }, `${line.kind === 'volume' ? 'Measured' : 'Weighed'} exactly the target`);
+
+    el.append(
+      h('div', { class: 'bench-name' }, line.name),
+      h('div', { class: 'bench-sub' }, `${ing.conc} ${ing.unit}${line.note ? ` · ${line.note}` : ''} · for ${fmt(s.volumeMl)} mL`),
+      h('div', { class: 'bench-target' }, h('div', { class: 'hint' }, line.kind === 'volume' ? 'Measure out' : 'Weigh out'), h('div', { class: 'big' }, B.displayAmount(line).text), h('div', { class: 'range' }, `Acceptable ${fmt(lo / f)} to ${fmt(hi / f)} ${unit} (±${tol}%)`)),
+      haz ? h('div', { class: 'note' }, `Safety: ${haz.length > 150 ? haz.slice(0, 147) + '…' : haz}`) : null,
+      line.warnings.map((w) => h('div', { class: 'note' }, w)),
+      h('div', { class: 'bench-input' }, input, unitSel),
+      feedback, fixBtn,
+      h('div', { class: 'row', style: 'justify-content:center;margin-top:10px' }, exact),
+      bar(next));
+    update(false);
+    setTimeout(() => { if (s.actuals[i] == null) input.focus(); }, 60);
+  }
+
+  // ----- the "Oops-proof" sheet -----
+  function weighedList() {
+    const p = plan();
+    return p.lines.map((l, i) => ({ i, target: l.amount, actual: s.actuals[i] })).filter((w) => w.actual != null);
+  }
+  function fixSheet(i) {
+    const p = plan();
+    const line = p.lines[i];
+    const ing = p.ingredients[i];
+    const a = s.actuals[i];
+    const weighed = weighedList();
+    const V = s.volumeMl;
+    const matchV = B.niceVolume(B.exactVolumeFor(V, line.amount, a));
+    const balV = B.niceVolume(B.balancedVolume(V, weighed));
+    const worstAt = (v) => Math.abs(B.worstDev(B.devsAtVolume(V, v, weighed)));
+    const dev = B.deviationPct(line.amount, a);
+    const achieved = B.achievedConc(ing, line.amount, a, V, V);
+    const apply = (v) => { s.volumeMl = v; save(); sheet.close(); draw(); toast(`Now making ${fmt(v)} mL. Everything left is recalculated.`); };
+    const opts = [
+      h('button', { type: 'button', class: 'option', onclick: () => apply(matchV) }, h('b', null, `Make ${fmt(matchV)} mL instead of ${fmt(V)} mL`), h('span', null, `${line.name} is then exactly right. Everything still to add is recalculated. ${worstAt(matchV) < 0.05 ? 'This ingredient is then exactly on target.' : `Worst weighing so far at that volume: ${worstAt(matchV).toFixed(1)}% off.`}`)),
+    ];
+    if (weighed.length > 1 && Math.abs(balV - matchV) > 0.05) opts.push(h('button', { type: 'button', class: 'option', onclick: () => apply(balV) }, h('b', null, `Best compromise: make ${fmt(balV)} mL`), h('span', null, `Balances everything you have weighed so far. Worst one is ${worstAt(balV).toFixed(1)}% off.`)));
+    opts.push(h('button', { type: 'button', class: 'option', onclick: () => { sheet.close(); toast('Kept as weighed. The record will show the real concentration.'); } }, h('b', null, `Keep ${fmt(V)} mL and accept it`), h('span', null, `${line.name} ends up at ${fmt(achieved.value)} ${achieved.unit}, which is ${Math.abs(dev).toFixed(1)}% ${dev > 0 ? 'over' : 'under'} target. This is written in the record.`)));
+    if (a < line.amount) opts.push(h('button', { type: 'button', class: 'option', onclick: () => { sheet.close(); toast(`Add ${B.displayAmount(line, line.amount - a).text} more, then enter the new total.`); } }, h('b', null, 'Add a bit more'), h('span', null, `You are short by ${B.displayAmount(line, line.amount - a).text}. Add it and type the new total.`)));
+    const sheet = openSheet({ title: dev > 0 ? 'Weighed too much?' : 'Weighed too little?', body: h('div', null, h('p', { class: 'muted' }, 'Pick the fix that suits you. You can always change your mind.'), opts) });
+  }
+
+  // ----- method step -----
+  function methodStep() {
+    const steps = B.methodSteps(s.recipe.steps);
+    const done = new Set(s.stepsDone || []);
+    el.append(
+      h('div', { class: 'bench-name' }, 'Dissolve and make up'),
+      h('div', { class: 'bench-target' }, h('div', { class: 'hint' }, 'Final volume'), h('div', { class: 'big' }, `${fmt(s.volumeMl)} mL`), s.recipe.ph ? h('div', { class: 'range' }, `Target pH ${s.recipe.ph}`) : null),
+      steps.length ? h('div', { class: 'card checklist' }, steps.map((t, k) => { const cb = h('input', { type: 'checkbox', checked: done.has(k) }); const lab = h('label', { class: done.has(k) ? 'done' : '' }, cb, h('span', null, t)); cb.addEventListener('change', () => { cb.checked ? done.add(k) : done.delete(k); s.stepsDone = [...done]; save(); lab.classList.toggle('done', cb.checked); }); return lab; })) : h('div', { class: 'card' }, h('p', null, `Dissolve everything in about 80% of the final volume of water, adjust the pH if needed, then make up to ${fmt(s.volumeMl)} mL.`)),
+      bar(h('button', { type: 'button', class: 'btn primary', onclick: () => { s.step = nIng() + 1; save(); draw(); window.scrollTo(0, 0); } }, 'Review and finish')));
+  }
+
+  // ----- review and save -----
+  function reviewStep() {
+    const p = plan();
+    const rows = p.lines.map((l, i) => {
+      const a = s.actuals[i];
+      const dev = B.deviationPct(l.amount, a);
+      const g = B.grade(dev, tol);
+      const ach = B.achievedConc(p.ingredients[i], l.amount, a, s.volumeMl, s.volumeMl);
+      return { l, i, a, dev, g, ach };
+    });
+    const worst = rows.reduce((m, r) => Math.max(m, Math.abs(r.dev)), 0);
+    const notes = h('textarea', { placeholder: 'Anything worth remembering (optional): lot numbers, pH reached, what went wrong…', maxlength: 1000, 'aria-label': 'Notes' }, s.notes || '');
+    notes.addEventListener('input', () => { s.notes = notes.value; save(); });
+    const finish = h('button', { type: 'button', class: 'btn primary', onclick: finishBatch }, icon('check', 18), 'Save batch record');
+    el.append(
+      h('div', { class: 'bench-name' }, 'Review'),
+      h('div', { class: 'bench-sub' }, `${s.recipe.name}: ${fmt(s.volumeMl)} mL`),
+      h('div', { class: `feedback ${worst <= tol ? 'ok' : worst <= tol * 2 ? 'near' : 'off'}` }, worst <= tol ? 'Everything within tolerance' : `Worst weighing is ${worst.toFixed(1)}% off`, h('small', null, 'The record stores what you really weighed and the concentrations you really got.')),
+      h('div', { class: 'card scroll-x' }, h('table', { class: 'plain' },
+        h('thead', null, h('tr', null, ['Ingredient', 'Target', 'Weighed', 'You got'].map((t, k) => h('th', { class: k ? 'num' : '' }, t)))),
+        h('tbody', null, rows.map((r) => h('tr', null, h('td', null, r.l.name), h('td', { class: 'num' }, B.displayAmount(r.l).text), h('td', { class: 'num' }, B.displayAmount(r.l, r.a).text), h('td', { class: 'num' }, `${fmt(r.ach.value)} ${r.ach.unit}`, h('div', { class: 'hint' }, B.fmtPct(r.dev)))))))),
+      h('div', { class: 'field' }, h('span', { class: 'field-label' }, 'Notes'), notes),
+      bar(finish));
+  }
+
+  function finishBatch() {
+    const p = plan();
+    const lines = p.lines.map((l, i) => {
+      const a = s.actuals[i];
+      return { name: l.name, kind: l.kind, target: l.amount, actual: a, deviationPct: B.deviationPct(l.amount, a), achieved: B.achievedConc(p.ingredients[i], l.amount, a, s.volumeMl, s.volumeMl) };
+    });
+    const set = store.settings();
+    const rec = store.addBatch({
+      recipeId: s.recipeId, recipeName: s.recipe.name, recipeVersion: s.recipe.version, volumeMl: s.volumeMl, shelfLifeDays: s.recipe.shelfLifeDays,
+      initials: set.initials, labName: set.labName, notes: s.notes, ph: s.recipe.ph,
+      composition: p.ingredients.map((x) => ({ name: x.name, conc: x.conc, unit: x.unit })), lines, steps: s.recipe.steps,
+    });
+    store.clearActiveBench();
+    haptic(25);
+    toast(`Saved as ${rec.number}.`);
+    go(`#/batch/${rec.id}`);
+  }
+
+  // ----- bottom bar and drawing -----
+  function bar(primary) {
+    const back = h('button', { type: 'button', class: 'btn', disabled: s.step === 0, onclick: () => { s.step = Math.max(0, s.step - 1); save(); draw(); window.scrollTo(0, 0); } }, icon('back', 18), 'Back');
+    return h('div', { class: 'actionbar', style: 'bottom:0;padding-bottom:calc(10px + var(--safe-b))' }, back, primary);
+  }
+  function draw() {
+    el.replaceChildren(dots());
+    const p = plan();
+    if (!p.ready) { el.append(h('div', { class: 'card' }, h('h2', null, 'This recipe cannot be made yet'), h('p', null, 'Some amounts cannot be calculated. Edit the recipe, then start again.'), h('a', { class: 'btn primary', href: '#/' }, 'Back'))); return; }
+    if (s.step < nIng()) ingredientStep(s.step);
+    else if (s.step === nIng()) methodStep();
+    else reviewStep();
+  }
+
+  function menuSheet() {
+    const sheet = openSheet({
+      title: s.recipe.name,
+      body: h('div', { class: 'row-stack' },
+        h('button', { type: 'button', class: 'btn', onclick: () => { sheet.close(); go('#/'); toast('Paused. Open the app any time and tap Resume.'); } }, 'Pause and come back later'),
+        h('button', { type: 'button', class: 'btn danger', onclick: async () => { sheet.close(); if (await confirmSheet({ title: 'Discard this batch?', message: 'The weights you entered will be lost.', confirmLabel: 'Discard', danger: true })) { store.clearActiveBench(); go('#/'); } } }, 'Discard this batch')),
+    });
+  }
+
+  draw();
+  return { title: `Making: ${s.recipe.name}`, back: null, bench: true, actions: [h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Pause or discard', onclick: menuSheet }, icon('close'))], el };
+}
+
+return { renderBench };
+})();
+const __m_js_pages_batches_js = (() => {
+const { h, icon, toast, fmtDate, expiryBadge, confirmSheet } = __m_js_ui_js;
+const { fmt } = __m_js_calc_js;
+const { store, go } = __m_js_state_js;
+const B = __m_js_bench_js;
+
+
+
+
+function renderBatches() {
+  const batches = store.batches();
+  const el = h('div');
+  if (!batches.length) {
+    el.append(h('div', { class: 'card' }, h('h2', null, 'No batches yet'), h('p', { class: 'muted' }, 'Each time you finish a solution in Bench Mode it is recorded here, with what you really weighed, an expiry date and a label to print.'), h('a', { class: 'btn primary', href: '#/' }, 'Choose a recipe to make')));
+  } else {
+    el.append(h('div', { class: 'list' }, batches.map((b) => h('a', { class: 'item', href: `#/batch/${b.id}` },
+      h('div', { class: 'title' }, `${b.recipeName}`),
+      h('div', { class: 'sub' }, `${b.number} · ${fmt(b.volumeMl)} mL · ${fmtDate(b.madeAt)}`),
+      b.expiresAt ? h('div', { style: 'margin-top:6px' }, expiryBadge(b.expiresAt)) : null))));
+  }
+  return { title: 'Batches', el };
+}
+
+function printAs(kind) {
+  document.body.classList.add(kind);
+  const done = () => { document.body.classList.remove(kind); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+}
+
+function renderBatch(ctx) {
+  const b = store.getBatch(ctx.params.id);
+  if (!b) return { title: 'Not found', back: '#/batches', el: h('div', { class: 'card' }, h('h2', null, 'Batch not found'), h('a', { class: 'btn primary', href: '#/batches' }, 'Back to batches')) };
+  const recipe = b.recipeId ? store.getRecipe(b.recipeId) : null;
+
+  const label = h('div', { class: 'label-card' },
+    b.labName ? h('div', null, b.labName) : null,
+    h('b', { class: 'n' }, b.recipeName),
+    h('div', { class: 'big' }, `${b.number} · ${fmt(b.volumeMl)} mL${b.ph ? ` · pH ${b.ph}` : ''}`),
+    h('div', null, `Made ${fmtDate(b.madeAt)}${b.initials ? ` by ${b.initials}` : ''}`),
+    h('div', null, b.expiresAt ? `Expires ${fmtDate(b.expiresAt)}` : 'Expiry: ____________'),
+    b.composition.length ? h('div', { style: 'margin-top:4px' }, b.composition.map((c) => `${c.conc} ${c.unit} ${c.name}`).join(' · ')) : null);
+
+  const sheet = h('div', { class: 'card' },
+    h('h2', null, `${b.recipeName} (v${b.recipeVersion})`),
+    h('div', { class: 'hint' }, `${b.labName ? b.labName + ' · ' : ''}${b.number} · ${fmt(b.volumeMl)} mL · made ${fmtDate(b.madeAt)}${b.initials ? ` by ${b.initials}` : ''}${b.expiresAt ? ` · expires ${fmtDate(b.expiresAt)}` : ''}`),
+    b.lines.length ? h('div', { class: 'scroll-x', style: 'margin-top:8px' }, h('table', { class: 'plain' },
+      h('thead', null, h('tr', null, ['Ingredient', 'Target', 'Weighed', 'You got'].map((t, k) => h('th', { class: k ? 'num' : '' }, t)))),
+      h('tbody', null, b.lines.map((l) => {
+        const amt = (v) => B.displayAmount({ kind: l.kind }, v).text;
+        return h('tr', null, h('td', null, l.name), h('td', { class: 'num' }, amt(l.target)), h('td', { class: 'num' }, amt(l.actual)), h('td', { class: 'num' }, l.achieved ? `${fmt(l.achieved.value)} ${l.achieved.unit}` : '', h('div', { class: 'hint' }, B.fmtPct(l.deviationPct ?? 0))));
+      })))) : null,
+    b.steps ? h('div', { style: 'margin-top:10px' }, h('b', null, 'Method'), h('ol', { style: 'margin:4px 0 0;padding-left:20px' }, B.methodSteps(b.steps).map((s) => h('li', null, s)))) : null,
+    b.notes ? h('p', { style: 'margin-top:10px' }, h('b', null, 'Notes: '), b.notes) : null,
+    h('div', { style: 'margin-top:16px;display:flex;gap:40px' }, h('span', { class: 'hint', style: 'border-top:1px solid var(--border);padding-top:4px;min-width:130px' }, 'Checked by'), h('span', { class: 'hint', style: 'border-top:1px solid var(--border);padding-top:4px;min-width:130px' }, 'Final pH')));
+
+  const el = h('div', null,
+    h('div', { class: 'row', style: 'margin-bottom:10px' }, expiryBadge(b.expiresAt), h('span', { class: 'badge' }, b.number)),
+    h('div', { class: 'print-label-only' }, h('h3', { class: 'no-print' }, 'Label'), label),
+    h('div', { class: 'row no-print', style: 'margin:10px 0 16px' },
+      h('button', { type: 'button', class: 'btn', onclick: () => printAs('print-label') }, icon('print', 18), 'Print label'),
+      h('button', { type: 'button', class: 'btn', onclick: () => printAs('print-sheet') }, icon('print', 18), 'Print record')),
+    h('div', { class: 'print-sheet-only' }, sheet),
+    h('div', { class: 'actionbar no-print' },
+      h('button', { type: 'button', class: 'btn danger', onclick: async () => {
+        if (!(await confirmSheet({ title: 'Delete this record?', message: `${b.number} will be removed from this device.`, confirmLabel: 'Delete', danger: true }))) return;
+        const gone = store.deleteBatch(b.id);
+        go('#/batches');
+        toast(`Deleted ${gone.number}.`, { action: 'Undo', onAction: () => { store.undeleteBatch(gone); go(`#/batch/${gone.id}`); } });
+      } }, icon('trash', 18)),
+      h('a', { class: `btn primary ${recipe ? '' : 'disabled'}`, href: recipe ? `#/recipe/${recipe.id}?vol=${b.volumeMl}` : '#/', 'aria-disabled': recipe ? null : 'true' }, icon('play', 18), recipe ? 'Make again' : 'Recipe was deleted')));
+  return { title: b.number, back: '#/batches', el };
+}
+
+return { renderBatches, renderBatch };
+})();
+const __m_js_pages_library_js = (() => {
+const { h, icon, toast, field, numInput, numOf, selectEl, openSheet, confirmSheet } = __m_js_ui_js;
+const { store, allReagents } = __m_js_state_js;
+const { ValidationError } = __m_js_store_js;
+
+
+
+function hazardBadges(text) {
+  const t = (text || '').toLowerCase();
+  const out = [];
+  if (/corrosive|severe burns/.test(t)) out.push(h('span', { class: 'badge bad' }, 'Corrosive'));
+  if (/flammable/.test(t)) out.push(h('span', { class: 'badge warn' }, 'Flammable'));
+  if (/toxic|fatal|carcinogen|mutagen|neurotoxic/.test(t)) out.push(h('span', { class: 'badge bad' }, 'Toxic'));
+  if (/oxidizer/.test(t)) out.push(h('span', { class: 'badge warn' }, 'Oxidizer'));
+  if (/irritant|harmful|damage/.test(t)) out.push(h('span', { class: 'badge warn' }, 'Harmful / irritant'));
+  return out;
+}
+
+function renderLibrary(ctx) {
+  const search = h('input', { type: 'search', placeholder: 'Search by name or formula', 'aria-label': 'Search reagents', autocomplete: 'off' });
+  const list = h('div', { class: 'list' });
+
+  function draw() {
+    const q = search.value.trim().toLowerCase();
+    const rows = allReagents().filter((r) => !q || r.name.toLowerCase().includes(q) || (r.formula || '').toLowerCase().includes(q));
+    list.replaceChildren(...rows.map((r) => h('details', { class: 'item' },
+      h('summary', { style: 'cursor:pointer;list-style:none' },
+        h('div', { class: 'title' }, r.name, r.custom ? [' ', h('span', { class: 'badge' }, 'Mine')] : null),
+        h('div', { class: 'sub' }, [r.formula, r.mw ? `${r.mw} g/mol` : null, r.form].filter(Boolean).join(' · ')),
+        h('div', { style: 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap' }, hazardBadges(r.hazards))),
+      h('div', { style: 'margin-top:10px' },
+        h('div', null, h('b', null, 'Safety: '), r.hazards || 'No information entered.'),
+        h('div', null, h('b', null, 'Storage: '), r.storage || 'No information entered.'),
+        r.form === 'liquid' ? h('div', null, h('b', null, 'Liquid: '), `density ${r.density ?? '?'} g/mL, ${r.purity ?? '?'}% pure`) : null,
+        r.solubility ? h('div', null, h('b', null, 'Dissolves up to about: '), `${r.solubility} g/L in water`) : null,
+        r.custom ? h('button', { type: 'button', class: 'btn small danger', style: 'margin-top:8px', onclick: async () => { if (await confirmSheet({ title: 'Remove this reagent?', message: 'Recipes that use it keep their own copy of its details.', confirmLabel: 'Remove', danger: true })) { store.removeCustomReagent(r.id); draw(); } } }, 'Remove') : null))));
+    if (!rows.length) list.append(h('p', { class: 'muted' }, 'No match. You can add your own reagent with the + button.'));
+  }
+
+  function addSheet() {
+    const f = { name: h('input', { type: 'text', maxlength: 120, autocapitalize: 'sentences' }), formula: h('input', { type: 'text', maxlength: 80 }), mw: numInput(), form: selectEl(['solid', 'liquid'], 'solid'), density: numInput(), purity: numInput(), solubility: numInput(), hazards: h('input', { type: 'text', maxlength: 500 }), storage: h('input', { type: 'text', maxlength: 200 }) };
+    const error = h('div', { class: 'note bad hidden', role: 'alert' });
+    const sheet = openSheet({
+      title: 'Add your own reagent',
+      body: h('div', null,
+        field('Name', f.name), h('div', { class: 'two' }, field('Formula', f.formula), field('Molecular weight (g/mol)', f.mw)), h('div', { class: 'two' }, field('Form', f.form), field('Purity (%)', f.purity)),
+        h('div', { class: 'two' }, field('Density (g/mL)', f.density), field('Solubility (g/L)', f.solubility)), field('Safety notes', f.hazards), field('Storage', f.storage), error,
+        h('button', { type: 'button', class: 'btn primary wide', onclick: () => {
+          try {
+            store.addCustomReagent({ name: f.name.value, formula: f.formula.value, mw: numOf(f.mw), form: f.form.value, density: numOf(f.density), purity: numOf(f.purity), solubility: numOf(f.solubility), hazards: f.hazards.value, storage: f.storage.value });
+            sheet.close(); draw(); toast('Reagent added. It now appears when you write a recipe.');
+          } catch (e) { if (!(e instanceof ValidationError)) throw e; error.textContent = e.message; error.classList.remove('hidden'); }
+        } }, 'Save reagent')),
+    });
+  }
+
+  search.addEventListener('input', draw);
+  draw();
+  return {
+    title: 'Reagents',
+    actions: [h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Add your own reagent', onclick: addSheet }, icon('plus'))],
+    el: h('div', null,
+      h('p', { class: 'muted small' }, 'About 70 common reagents. Values are typical and approximate: always check your bottle and the supplier\'s safety data sheet.'),
+      h('div', { class: 'search' }, search), list),
+  };
+}
+
+return { renderLibrary };
+})();
+const __m_js_pages_quick_js = (() => {
+const { h, icon, toast, field, numInput, numOf, openSheet } = __m_js_ui_js;
+const { fmt } = __m_js_calc_js;
+const { store, go } = __m_js_state_js;
+const { ValidationError } = __m_js_store_js;
+const { blankRow, rowToIngredient, reagentDatalist, ingredientCard } = __m_js_ing_form_js;
+const { planBatch, displayAmount } = __m_js_bench_js;
+
+
+
+
+
+
+// One ingredient, one volume, answer straight away. Can be saved as a recipe or made in Bench Mode.
+function renderQuick() {
+  const row = blankRow();
+  row.unit = 'mM';
+  const vol = numInput({ placeholder: 'e.g. 500', 'aria-label': 'Volume in millilitres' });
+  const result = h('div');
+  const list = h('div');
+
+  function buildRecipe() {
+    const v = numOf(vol);
+    if (!(v > 0)) return { hint: 'Enter the volume you want to make.' };
+    try {
+      const ing = rowToIngredient(row);
+      if (!ing.name) return { hint: 'Choose the ingredient.' };
+      if (!(ing.conc > 0)) return { hint: 'Enter how much the solution should contain.' };
+      const label = `${ing.name} ${ing.conc} ${ing.unit}`;
+      return { recipe: { name: label, description: '', finalVolumeMl: v, ph: null, shelfLifeDays: null, steps: 'Add about 80% of the final volume of water.\nDissolve the ingredient.\nMake up to the final volume.', ingredients: [ing] }, volume: v };
+    } catch (e) {
+      if (e instanceof ValidationError) return { hint: e.message };
+      throw e;
+    }
+  }
+
+  function draw() {
+    const b = buildRecipe();
+    result.replaceChildren();
+    if (!b.recipe) { result.append(h('p', { class: 'muted' }, b.hint)); return; }
+    const plan = planBatch(b.recipe, b.volume);
+    const l = plan.lines[0];
+    result.append(
+      h('div', { class: `amt ${l.warnings.length ? 'warn' : ''}` }, h('div', null, h('div', { class: 'name' }, l.name), h('div', { class: 'conc' }, `${b.recipe.ingredients[0].conc} ${b.recipe.ingredients[0].unit} in ${fmt(b.volume)} mL`), l.warnings.map((w) => h('div', { class: 'hint', style: 'color:var(--warn)' }, w))), h('div', { class: 'num' }, l.amount === null ? '—' : displayAmount(l).text)),
+      h('div', { class: 'hint', style: 'margin:6px 2px' }, `Then add water up to ${fmt(b.volume)} mL.`),
+      h('div', { class: 'row-stack' },
+        h('button', { type: 'button', class: 'btn primary', disabled: !plan.ready, onclick: () => { store.setTemp(b.recipe); go(`#/recipe/temp?vol=${b.volume}`); } }, icon('play', 18), 'Weigh it with live feedback'),
+        h('button', { type: 'button', class: 'btn', onclick: () => {
+          const r = store.saveRecipe(b.recipe);
+          toast('Saved to your recipes.');
+          go(`#/recipe/${r.id}`);
+        } }, 'Save as a recipe')));
+  }
+
+  const drawCard = () => { list.replaceChildren(ingredientCard(row, { redraw: drawCard, onChange: draw })); draw(); };
+  vol.addEventListener('input', draw);
+  drawCard();
+  return {
+    title: 'Quick make',
+    el: h('div', null, reagentDatalist(),
+      h('p', { class: 'muted' }, 'Need one solution right now? Choose the ingredient, say how much it should contain, and how much you want to make.'),
+      list,
+      h('div', { class: 'card' }, field('Volume to make (mL)', vol)),
+      result),
+  };
+}
+
+return { renderQuick };
+})();
+const __m_js_pages_settings_js = (() => {
+const { h, icon, toast, field, numInput, numOf, selectEl, download, openSheet, confirmSheet, fmtDate } = __m_js_ui_js;
+const { store, go } = __m_js_state_js;
+const { ValidationError, validateExport } = __m_js_store_js;
+
+
+
+const APP_VERSION = '1.0.0';
+
+function applyTheme() {
+  const t = store.settings().theme;
+  const dark = t === 'dark' || (t === 'auto' && globalThis.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+
+function renderSettings(ctx) {
+  const s = store.settings();
+  const labName = h('input', { type: 'text', maxlength: 80, value: s.labName, placeholder: 'Shown on labels, e.g. Khan Lab' });
+  const initials = h('input', { type: 'text', maxlength: 8, value: s.initials, placeholder: 'e.g. AK', autocapitalize: 'characters' });
+  const tol = numInput({ value: s.tolerancePct });
+  const theme = selectEl([{ value: 'auto', label: 'Match my device' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }], s.theme);
+  const fileInput = h('input', { type: 'file', accept: 'application/json,.json', class: 'hidden', 'aria-label': 'Choose a backup file' });
+
+  const saveBtn = h('button', { type: 'button', class: 'btn primary wide', onclick: () => {
+    try {
+      store.setSettings({ labName: labName.value, initials: initials.value.toUpperCase(), tolerancePct: numOf(tol), theme: theme.value });
+      applyTheme();
+      toast('Saved.');
+    } catch (e) { if (!(e instanceof ValidationError)) throw e; toast(e.message, { kind: 'error' }); }
+  } }, 'Save settings');
+
+  function backup() {
+    const data = store.exportData();
+    const stamp = new Date().toISOString().slice(0, 10);
+    download(`labkit-recipes-backup-${stamp}.json`, JSON.stringify(data, null, 2));
+    toast('Backup saved to your downloads. Keep it somewhere safe.');
+    ctx.rerender();
+  }
+
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files && fileInput.files[0];
+    fileInput.value = '';
+    if (!f) return;
+    let parsed;
+    try {
+      if (f.size > 8 * 1024 * 1024) throw new Error('too big');
+      parsed = JSON.parse(await f.text());
+    } catch { toast('That file could not be read as a backup.', { kind: 'error' }); return; }
+    // Check it before offering any choice, so a wrong file is refused straight away.
+    try { validateExport(parsed); } catch (e) { if (!(e instanceof ValidationError)) throw e; toast(e.message, { kind: 'error', ms: 7000 }); return; }
+    const sheet = openSheet({
+      title: 'Restore from this file?',
+      body: h('div', null,
+        h('p', { class: 'muted' }, 'Choose how to bring it in. Nothing changes until you pick one.'),
+        h('button', { type: 'button', class: 'option', onclick: () => run('merge') }, h('b', null, 'Add to what is here (recommended)'), h('span', null, 'Keeps your current recipes. Adds new ones from the file and uses the file\'s version only when it is newer.')),
+        h('button', { type: 'button', class: 'option', onclick: () => run('replace') }, h('b', null, 'Replace everything'), h('span', null, 'Your current recipes and batches are removed and replaced by the file.'))),
+    });
+    async function run(mode) {
+      if (mode === 'replace' && !(await confirmSheet({ title: 'Replace everything?', message: 'Your current recipes and batch records on this device will be deleted. Back up first if unsure.', confirmLabel: 'Replace', danger: true }))) return;
+      try {
+        const c = store.importData(parsed, mode);
+        sheet.close();
+        toast(`Restored: ${c.recipesAdded} new and ${c.recipesUpdated} updated recipes, ${c.batchesAdded} batches.`);
+        ctx.rerender();
+      } catch (e) { if (!(e instanceof ValidationError)) throw e; sheet.close(); toast(e.message, { kind: 'error', ms: 7000 }); }
+    }
+  });
+
+  async function erase() {
+    if (!(await confirmSheet({ title: 'Erase everything?', message: 'This deletes all recipes, batch records and settings on this device. It cannot be undone. Have you backed up?', confirmLabel: 'Erase everything', danger: true }))) return;
+    store.eraseAll();
+    toast('Everything was erased.');
+    go('#/');
+  }
+
+  const last = store.lastBackup();
+  const stats = store.stats();
+  return {
+    title: 'More',
+    el: h('div', null,
+      h('div', { class: 'card' }, h('h2', null, 'Your details'), h('p', { class: 'muted small' }, 'Printed on labels and records.'), field('Lab or group name', labName), field('Your initials', initials)),
+      h('div', { class: 'card' }, h('h2', null, 'Bench Mode'), field('Weighing tolerance (%)', tol, 'How close counts as right. 2% is common for routine buffers; use 0.5 to 1% for something precious.'), field('Appearance', theme), saveBtn),
+      h('div', { class: 'card' },
+        h('h2', null, 'Backup and restore'),
+        h('p', { class: 'muted' }, 'Your recipes live only on this device, in this browser. If you clear your browser data they are gone, so back up now and then.'),
+        h('p', { class: 'small' }, last ? `Last backup: ${fmtDate(last)}.` : 'You have not made a backup yet.', ` You have ${stats.recipes} recipes and ${stats.batches} batch records.`),
+        h('div', { class: 'row-stack' },
+          h('button', { type: 'button', class: 'btn primary', onclick: backup }, icon('download', 18), 'Download a backup'),
+          h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon('upload', 18), 'Restore from a backup file')),
+        fileInput,
+        !store.persistent ? h('div', { class: 'note bad' }, 'This browser is not saving data right now (private window or blocked storage).') : null),
+      h('div', { class: 'card' },
+        h('h2', null, 'Help'),
+        h('div', { class: 'row-stack' }, h('a', { class: 'btn', href: '#/help' }, 'How it works, install on your phone, glossary'))),
+      h('div', { class: 'card' },
+        h('h2', null, 'About'),
+        h('p', { class: 'small muted' }, `LabKit Recipes ${APP_VERSION}. Works offline. No account, no tracking: nothing you enter ever leaves this device unless you share or back it up yourself.`),
+        h('p', { class: 'small muted' }, 'Reagent values are typical and approximate. This tool does not replace your protocol, a calibrated balance, a pH meter or the safety data sheet.')),
+      h('div', { class: 'card' }, h('h2', null, 'Danger zone'), h('button', { type: 'button', class: 'btn danger wide', onclick: erase }, icon('trash', 18), 'Erase everything on this device'))),
+  };
+}
+
+return { APP_VERSION, applyTheme, renderSettings };
+})();
+const __m_js_glossary_js = (() => {
+
+// Plain-language definitions. Pure data (no page code), so tests can check every reference to it.
+// short: one sentence shown in tooltips. long: used on the Help page.
+const GLOSSARY = {
+  Lab: { short: 'Your team’s private workspace. Recipes, stock and records belong to a lab.', long: 'A lab is a private workspace shared by a team. Everything you save (recipes, inventory, prep records) belongs to your lab, and people in other labs cannot see it. You create a lab when you sign up, or join one with a code from a lab admin.' },
+  'Join code': { short: 'A short code from a lab admin that lets you join their lab.', long: 'A code a lab admin can share (Account page, “Your lab team”) so teammates can join the lab. Admins can replace it at any time and the old one stops working.' },
+  MW: { short: 'Molecular weight, in g/mol: the mass of one mole of the substance.', long: 'Molecular weight (g/mol) is the mass of one mole of a substance. It is printed on the bottle. For hydrates (such as MgCl₂·6H₂O) use the weight that includes the water.' },
+  Molarity: { short: 'Concentration as moles per litre. 1 mM = 0.001 M.', long: 'Moles of the substance per litre of solution. M = mol/L, mM = 0.001 M, µM = 0.000001 M.' },
+  '% w/v': { short: 'Grams per 100 mL. A 10% w/v solution has 10 g in 100 mL.', long: 'Weight per volume: grams of solid in 100 mL of final solution. 10% w/v = 10 g per 100 mL = 100 g/L.' },
+  '% v/v': { short: 'Millilitres of a liquid per 100 mL of final solution.', long: 'Volume per volume: millilitres of a liquid ingredient in 100 mL of final solution. Only for liquids.' },
+  Purity: { short: 'How much of the bottle is the actual compound. A 98% reagent needs 2% more weighed out.', long: 'The percentage of the reagent that is the compound itself, from the bottle label. LabKit weighs out a little extra for solids that are under 100% pure, and uses purity to convert liquids (such as 37% HCl) to the volume to measure.' },
+  Density: { short: 'Mass per millilitre of a liquid. Lets LabKit turn grams into a volume you can pipette.', long: 'Grams per millilitre of a liquid reagent, from the bottle or data sheet. LabKit uses it to tell you how many millilitres to measure instead of how many grams to weigh.' },
+  Solubility: { short: 'The most that dissolves in water (approximate). Above this, solid stays undissolved.', long: 'Roughly how many grams dissolve in a litre of water at room temperature. If a recipe needs more than this, the solid may not fully dissolve.' },
+  pKa: { short: 'The pH at which a buffer is half acid, half base. Pick a buffer with a pKa close to your target pH.', long: 'The pH at which a buffer’s acid and base forms are present in equal amounts. A buffer works best within about one pH unit of its pKa.' },
+  'Serial dilution': { short: 'Repeatedly diluting by the same factor, e.g. 1:10, 1:100, 1:1000.', long: 'A series of tubes where each is made by diluting the previous one by the same factor. Used to make standard curves and to bring a concentrated sample into range.' },
+  'Dilution factor': { short: '10 means 1 part sample in 10 parts total (1:10).', long: 'How many times a sample was diluted. A dilution factor of 10 means 1 part sample plus 9 parts diluent. Enter it so results are multiplied back to the original concentration.' },
+  RCF: { short: 'Relative centrifugal force, in × g. How hard a centrifuge pulls, in multiples of gravity.', long: 'Relative centrifugal force (× g) is how strongly a centrifuge pulls on the sample, as a multiple of gravity. Protocols give × g, but machines are set in RPM; the conversion depends on the rotor’s radius.' },
+  RPM: { short: 'Revolutions per minute: the speed a centrifuge is set to.', long: 'Revolutions per minute. The same RPM gives different × g in different rotors, so always convert using your rotor’s radius.' },
+  'Master mix': { short: 'A shared pre-mix of reagents, made once and shared out across all your reaction tubes.', long: 'For PCR, you mix the common ingredients once for all reactions (plus a little extra for pipetting loss), then share it between tubes and add the sample to each.' },
+  'Lot number': { short: 'The batch code on a reagent bottle. Recorded so problems can be traced to a batch.', long: 'The batch identifier printed on the bottle. Recording it with each prep lets you trace a problem back to a specific batch.' },
+  'Reorder level': { short: 'When stock falls to this amount, LabKit flags it as low.', long: 'The quantity at or below which an inventory item is shown as “low stock” and added to the reorder list.' },
+  'Prep record': { short: 'A permanent record of one preparation: what, how much, which lots, who, when, and the expiry date.', long: 'A record created when you prepare a recipe. It stores the amounts, lot numbers, who made it, when, and when it expires. Prep records cannot be edited or deleted, so they stay trustworthy.' },
+  'Audit trail': { short: 'A tamper-evident log of who changed what, and when.', long: 'A log of every important action in your lab. Each entry is linked to the previous one with a checksum, so changing or removing old entries can be detected.' },
+  Blank: { short: 'A well or tube with no sample, used to measure the background signal.', long: 'A control containing everything except the sample. Its reading is the background, which is subtracted from the other readings.' },
+  'Standard curve': { short: 'Readings from known amounts, used to work out unknown amounts from their readings.', long: 'You measure samples of known concentration, plot reading against concentration, and fit a line or curve. Then an unknown sample’s reading can be turned into a concentration.' },
+  Replicates: { short: 'Repeats of the same measurement, to show how consistent it is.', long: 'The same sample measured more than once. Replicates show how consistent the measurement is, and averaging them reduces random error.' },
+  'CV %': { short: 'How much replicates vary, as a percentage of their mean. Lower is better.', long: 'Coefficient of variation: standard deviation divided by the mean, as a percentage. Replicates with a CV under about 10% are usually considered consistent.' },
+  'R²': { short: 'How closely the curve follows your data. Closer to 1 is better.', long: 'A measure of how well the fitted line or curve matches the points. 1 is a perfect fit. For a standard curve you usually want 0.98 or higher.' },
+  LOD: { short: 'Limit of detection: the smallest amount that can reliably be told apart from nothing.', long: 'Limit of detection, estimated here as 3.3 × the scatter around the line ÷ the slope. Amounts below this should not be reported as measured.' },
+  LOQ: { short: 'Limit of quantification: the smallest amount that can be measured accurately.', long: 'Limit of quantification, estimated here as 10 × the scatter around the line ÷ the slope. Reliable numbers start above this.' },
+  ELISA: { short: 'A common antibody-based test whose readings follow an S-shaped curve.', long: 'Enzyme-linked immunosorbent assay. Readings usually follow an S-shaped (sigmoidal) curve against concentration, which a 4-parameter logistic fit describes well.' },
+  '4PL': { short: 'A four-parameter S-shaped curve fit, used for ELISA and dose-response data.', long: 'Four-parameter logistic: a smooth S-shaped curve with a floor, a ceiling, a midpoint and a steepness. It is the standard fit for ELISA and dose-response data.' },
+  IC50: { short: 'The concentration that cuts the response in half (for inhibitors).', long: 'The concentration at which a compound reduces a response to half of its maximum. If the response goes up instead (an activator), the same number is called EC50.' },
+  EC50: { short: 'The concentration that gives half of the maximum response.', long: 'The concentration at which a compound produces half of its maximum effect.' },
+  'Hill slope': { short: 'How steep the S-shaped curve is. About 1 is typical.', long: 'The steepness of a dose-response curve around its midpoint. Values near 1 are typical; much higher values mean a sharp switch.' },
+  'Michaelis-Menten': { short: 'The standard model of how enzyme speed rises with substrate and levels off.', long: 'A model in which reaction speed rises with substrate concentration and levels off at a maximum (Vmax). Km is the substrate concentration at which the speed is half of Vmax.' },
+  Vmax: { short: 'The maximum reaction speed when the enzyme is fully saturated with substrate.', long: 'The fastest reaction speed the enzyme can reach, when there is so much substrate that every enzyme molecule is busy. A higher Vmax means more enzyme, or a faster enzyme.' },
+  Km: { short: 'The substrate concentration that gives half of the maximum speed. Lower = tighter binding.', long: 'The Michaelis constant: the substrate concentration at which the reaction runs at half of Vmax.' },
+  kcat: { short: 'Turnover number: reactions per enzyme molecule per unit time (needs enzyme concentration).', long: 'Vmax divided by the total enzyme concentration: how many substrate molecules one enzyme molecule converts in a unit of time.' },
+};
+
+return { GLOSSARY };
+})();
+const __m_js_pages_help_js = (() => {
+const { h } = __m_js_ui_js;
+const { GLOSSARY } = __m_js_glossary_js;
+
+
+const section = (title, ...kids) => h('div', { class: 'card' }, h('h2', null, title), ...kids);
+const steps = (items) => h('ol', { style: 'margin:0;padding-left:20px' }, items.map((t) => h('li', { style: 'margin:6px 0' }, t)));
+
+function renderHelp() {
+  const terms = ['MW', 'Molarity', '% w/v', '% v/v', 'Purity', 'Density', 'Solubility', 'Lot number', 'Prep record'].filter((k) => GLOSSARY[k]);
+  return {
+    title: 'Help',
+    back: '#/settings',
+    el: h('div', null,
+      section('Make your first solution (2 minutes)',
+        steps([
+          'On the Recipes tab, tap "Add starter recipes". Open "1× PBS".',
+          'Choose how much to make (tap a volume such as 500 mL). The amounts update at once.',
+          'Tap "Make it". For each ingredient, weigh it and type what the balance shows.',
+          'If you went over or under, tap "Fix it" and pick the smartest option.',
+          'Follow the method checklist, then review and save. You get a batch record and a label to print.',
+        ])),
+      section('Bench Mode explained',
+        h('p', null, 'It shows one ingredient at a time in large print, so you can read it from arm\'s length with gloves on. It tells you how close your weighing is to the target.'),
+        h('ul', { style: 'margin:0;padding-left:20px' },
+          h('li', null, h('b', null, 'Spot on / Within tolerance: '), 'carry on. The tolerance is set in More (2% by default).'),
+          h('li', null, h('b', null, 'A little off / Too far off: '), 'tap "Fix it". It can make a slightly different final volume so your solution still has exactly the right concentration, and recalculate everything left to add.'),
+          h('li', null, h('b', null, 'Best compromise: '), 'when several ingredients are slightly off, it finds the one volume that makes the worst of them as small as possible.'),
+          h('li', null, h('b', null, 'Keep and accept: '), 'the record then shows the real concentration you made, so nobody is misled later.'))),
+      section('Swap form',
+        h('p', null, 'If you have magnesium chloride anhydrous but the recipe says hexahydrate (or a similar pair), tap "Swap form" on that ingredient. The weight changes so you still get the same amount of the compound.')),
+      section('Your data and backups',
+        h('p', null, 'Everything is stored on this device, in this browser. There is no account and no server.'),
+        h('ul', { style: 'margin:0;padding-left:20px' },
+          h('li', null, 'Clearing your browser data, or using a private window, can erase it. Use More → Download a backup now and then.'),
+          h('li', null, 'To move to another device or share with a colleague: download a backup, send the file, and use "Restore from a backup file" there.'),
+          h('li', null, 'On an iPhone, Safari can clear data for sites you have not opened for a while. Adding the app to your Home Screen and keeping a backup avoids that.'))),
+      section('Install on your phone',
+        h('p', null, h('b', null, 'Android (Chrome): '), 'open the menu (⋮) and choose "Install app" or "Add to Home screen".'),
+        h('p', null, h('b', null, 'iPhone (Safari): '), 'tap the Share button, then "Add to Home Screen".'),
+        h('p', { class: 'muted small' }, 'Once installed or opened once, it works with no internet.')),
+      section('Questions',
+        h('p', null, h('b', null, 'Can two people share recipes? '), 'Not live. Send a backup file, or use the Share button on a recipe to send it as text.'),
+        h('p', null, h('b', null, 'Why is a recipe warning shown? '), 'For example: more solid than will dissolve, an amount too small to weigh, or a liquid that would take up more than the final volume.'),
+        h('p', null, h('b', null, 'Are the reagent values certified? '), 'No. They are typical values. Check your bottle and safety data sheet.')),
+      section('Words used', h('dl', { class: 'glossary' }, terms.flatMap((k) => [h('dt', null, k), h('dd', null, GLOSSARY[k].long)])))),
+  };
+}
+
+return { renderHelp };
+})();
+const __m_js_main_js = (() => {
+const { h, clear, icon, toast } = __m_js_ui_js;
+const { store } = __m_js_state_js;
+const { renderRecipes } = __m_js_pages_recipes_js;
+const { renderRecipe } = __m_js_pages_recipe_js;
+const { renderRecipeEdit } = __m_js_pages_recipe_edit_js;
+const { renderBench } = __m_js_pages_bench_js;
+const { renderBatches, renderBatch } = __m_js_pages_batches_js;
+const { renderLibrary } = __m_js_pages_library_js;
+const { renderQuick } = __m_js_pages_quick_js;
+const { renderSettings, applyTheme } = __m_js_pages_settings_js;
+const { renderHelp } = __m_js_pages_help_js;
+
+
+
+
+
+
+
+
+
+
+
+// [pattern, page, tab]  (more specific patterns first)
+const ROUTES = [
+  ['/', renderRecipes, 'recipes'],
+  ['/recipe/new', renderRecipeEdit, 'recipes'],
+  ['/recipe/:id/edit', renderRecipeEdit, 'recipes'],
+  ['/recipe/:id', renderRecipe, 'recipes'],
+  ['/bench', renderBench, 'recipes'],
+  ['/batches', renderBatches, 'batches'],
+  ['/batch/:id', renderBatch, 'batches'],
+  ['/quick', renderQuick, 'quick'],
+  ['/library', renderLibrary, 'library'],
+  ['/settings', renderSettings, 'more'],
+  ['/help', renderHelp, 'more'],
+];
+const TABS = [
+  ['recipes', 'Recipes', '#/', 'recipes'],
+  ['quick', 'Quick', '#/quick', 'quick'],
+  ['batches', 'Batches', '#/batches', 'batches'],
+  ['library', 'Reagents', '#/library', 'library'],
+  ['more', 'More', '#/settings', 'more'],
+];
+
+const view = document.getElementById('view');
+const appbar = document.getElementById('appbar');
+const tabbar = document.getElementById('tabbar');
+
+function match(path) {
+  for (const [pattern, page, tab] of ROUTES) {
+    const keys = [];
+    const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '/?$');
+    const m = re.exec(path);
+    if (m) {
+      const params = {};
+      keys.forEach((k, i) => { try { params[k] = decodeURIComponent(m[i + 1]); } catch { params[k] = m[i + 1]; } });
+      return { page, tab, params };
+    }
+  }
+  return null;
+}
+
+function parseHash() {
+  const raw = location.hash.replace(/^#/, '') || '/';
+  const [path, qs = ''] = raw.split('?');
+  return { path: path || '/', query: Object.fromEntries(new URLSearchParams(qs)) };
+}
+
+function drawTabs(active) {
+  clear(tabbar);
+  for (const [key, label, href, ic] of TABS) tabbar.append(h('a', { href, 'aria-current': key === active ? 'page' : null }, icon(ic, 24), label));
+}
+
+let first = true;
+function route() {
+  const { path, query } = parseHash();
+  const m = match(path);
+  const ctx = { params: m ? m.params : {}, query, go: (to) => { location.hash = to; }, rerender: () => route() };
+  let page;
+  try {
+    page = m ? m.page(ctx) : { title: 'Not found', back: '#/', el: h('div', { class: 'card' }, h('h2', null, 'Page not found'), h('a', { class: 'btn primary', href: '#/' }, 'Go to recipes')) };
+  } catch (e) {
+    console.error(e);
+    page = { title: 'Something went wrong', back: '#/', el: h('div', { class: 'card' }, h('h2', null, 'Something went wrong'), h('p', { class: 'muted' }, 'Your data is safe. Try going back.'), h('a', { class: 'btn primary', href: '#/' }, 'Back to recipes')) };
+  }
+  document.body.classList.toggle('bench-mode', !!page.bench);
+  clear(appbar).append(
+    page.back ? h('a', { class: 'icon-btn', href: page.back, 'aria-label': 'Back' }, icon('back')) : h('span', { class: 'icon-btn', 'aria-hidden': 'true' }, icon('flask')),
+    h('h1', null, page.title),
+    page.actions || null);
+  clear(view).append(page.el);
+  drawTabs(m ? m.tab : 'recipes');
+  document.title = page.title === 'LabKit Recipes' ? 'LabKit Recipes' : `${page.title} · LabKit Recipes`;
+  window.scrollTo(0, 0);
+  if (!first) view.focus({ preventScroll: true });
+  first = false;
+}
+
+applyTheme();
+if (globalThis.matchMedia) matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+window.addEventListener('hashchange', route);
+route();
+
+// Offline support when served over http(s). A single downloaded file works offline by itself.
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is a bonus, never an error */ });
+}
+
+return {  };
+})();
+</script>
+</body>
+</html>
