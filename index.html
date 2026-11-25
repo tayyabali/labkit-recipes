@@ -249,6 +249,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const ICONS = {
   recipes: 'M4 4h12a3 3 0 0 1 3 3v13H7a3 3 0 0 1-3-3z M8 8h7 M8 12h7',
   quick: 'M13 2 4 14h7l-1 8 9-12h-7z',
+  formulas: 'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z M9.5 14.5a2.5 2.5 0 0 0 2.5 2.5',
   batches: 'M9 4h6v3H9z M7 5H5v16h14V5h-2 M9 14l2 2 4-4',
   library: 'M9 3h6 M10 3v6L4.5 19a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 9V3',
   more: 'M4 7h16 M4 12h16 M4 17h16',
@@ -672,15 +673,353 @@ function explainRcf({ rpm, rcf, radiusCm }, r) {
 
 return { CONC, VOL, MASS, LENGTH, RECIPE_UNITS, BUFFERS, molarity, liquidVolume, neatMolarity, dilution, serialDilution, buffer, rcfFromRpm, rpmFromRcf, pcr, recipeLines, formatAmount, addDays, bestUnit, fmt, withUnit, explainMolarity, explainDilution, explainBuffer, explainRcf };
 })();
+const __m_js_formulas_js = (() => {
+
+// Formulation maths and knowledge for cosmetic products (creams, lotions, sunscreens...).
+// No browser code here, so it is covered by Node tests.
+
+const ROLES = [
+  { key: 'water', label: 'Water' },
+  { key: 'oil', label: 'Oil / emollient' },
+  { key: 'wax', label: 'Wax / fatty alcohol / butter' },
+  { key: 'emulsifier', label: 'Emulsifier' },
+  { key: 'particulate', label: 'Mineral / pigment powder (ZnO, TiO2...)' },
+  { key: 'dispersant', label: 'Dispersant / wetting agent' },
+  { key: 'active', label: 'Active ingredient' },
+  { key: 'humectant', label: 'Humectant (glycerin...)' },
+  { key: 'thickener', label: 'Thickener / polymer / gum' },
+  { key: 'film', label: 'Film former / silicone' },
+  { key: 'preservative', label: 'Preservative' },
+  { key: 'antioxidant', label: 'Antioxidant' },
+  { key: 'fragrance', label: 'Fragrance' },
+  { key: 'ph', label: 'pH adjuster' },
+  { key: 'other', label: 'Other' },
+];
+const ROLE_KEYS = ROLES.map((r) => r.key);
+const roleLabel = (k) => (ROLES.find((r) => r.key === k) || ROLES[ROLES.length - 1]).label;
+
+const PHASES = [
+  { key: 'A', label: 'A: oil phase (heated)' },
+  { key: 'B', label: 'B: water phase (heated)' },
+  { key: 'C', label: 'C: cool-down (added below ~40 °C)' },
+  { key: 'D', label: 'D: final (pH, extras)' },
+];
+const PHASE_KEYS = PHASES.map((p) => p.key);
+const phaseLabel = (k) => (PHASES.find((p) => p.key === k) || PHASES[0]).label;
+
+// Handy suggestions while typing a name: sets the usual role and phase. Names are common INCI-style names.
+const COMMON_INGREDIENTS = [
+  ['Water (aqua)', 'water', 'B'], ['Glycerin', 'humectant', 'B'], ['Propanediol', 'humectant', 'B'], ['Butylene glycol', 'humectant', 'B'],
+  ['Xanthan gum', 'thickener', 'B'], ['Carbomer', 'thickener', 'B'], ['Hydroxyethylcellulose', 'thickener', 'B'], ['Sodium hyaluronate', 'active', 'B'],
+  ['Niacinamide', 'active', 'B'], ['Panthenol', 'active', 'B'], ['Allantoin', 'active', 'B'],
+  ['Caprylic/capric triglyceride', 'oil', 'A'], ['Isopropyl myristate', 'oil', 'A'], ['C12-15 alkyl benzoate', 'oil', 'A'], ['Squalane', 'oil', 'A'],
+  ['Jojoba oil', 'oil', 'A'], ['Sweet almond oil', 'oil', 'A'], ['Sunflower oil', 'oil', 'A'], ['Mineral oil', 'oil', 'A'],
+  ['Cetyl alcohol', 'wax', 'A'], ['Stearyl alcohol', 'wax', 'A'], ['Cetearyl alcohol', 'wax', 'A'], ['Stearic acid', 'wax', 'A'], ['Beeswax', 'wax', 'A'], ['Shea butter', 'wax', 'A'], ['Cocoa butter', 'wax', 'A'],
+  ['Glyceryl stearate', 'emulsifier', 'A'], ['Glyceryl stearate citrate', 'emulsifier', 'A'], ['Cetearyl glucoside', 'emulsifier', 'A'], ['Polysorbate 60', 'emulsifier', 'A'], ['Polysorbate 80', 'emulsifier', 'B'], ['PEG-100 stearate', 'emulsifier', 'A'],
+  ['Zinc oxide', 'particulate', 'A'], ['Titanium dioxide', 'particulate', 'A'], ['Iron oxides (yellow)', 'particulate', 'A'], ['Iron oxides (red)', 'particulate', 'A'], ['Silica', 'particulate', 'A'], ['Mica', 'particulate', 'A'],
+  ['Polyglyceryl-3 polyricinoleate', 'dispersant', 'A'], ['Dimethicone', 'film', 'A'], ['Cyclopentasiloxane', 'film', 'A'],
+  ['Phenoxyethanol', 'preservative', 'C'], ['Phenoxyethanol and ethylhexylglycerin', 'preservative', 'C'], ['Potassium sorbate', 'preservative', 'B'], ['Sodium benzoate', 'preservative', 'B'],
+  ['Tocopherol (vitamin E)', 'antioxidant', 'C'], ['Fragrance (parfum)', 'fragrance', 'C'], ['Citric acid', 'ph', 'D'], ['Sodium hydroxide solution', 'ph', 'D'],
+].map(([name, role, phase]) => ({ name, role, phase }));
+
+const METRICS = [
+  { key: 'look', label: 'Skin look', low: 'very white / chalky', high: 'invisible, natural' },
+  { key: 'texture', label: 'Texture', low: 'grainy / lumpy', high: 'smooth, even' },
+  { key: 'feel', label: 'Skin feel', low: 'sticky or greasy', high: 'light, comfortable' },
+  { key: 'stability', label: 'Stability', low: 'separates / changes', high: 'unchanged' },
+];
+
+const round = (v, d = 4) => Math.round(v * 10 ** d) / 10 ** d;
+const norm = (s) => String(s || '').trim().toLowerCase();
+
+function totalPct(ingredients) {
+  return round((ingredients || []).reduce((s, i) => s + (Number(i.pct) || 0), 0), 6);
+}
+
+// grams of each ingredient for a batch of batchG grams
+function scaleToGrams(formula, batchG) {
+  return formula.ingredients.map((i) => ({ ...i, grams: (Number(i.pct) / 100) * batchG }));
+}
+
+function fmtGrams(g) {
+  if (!Number.isFinite(g)) return '—';
+  if (g >= 100) return `${round(g, 1)} g`;
+  if (g >= 10) return `${round(g, 2)} g`;
+  if (g >= 1) return `${round(g, 3)} g`;
+  return `${round(g * 1000, 1)} mg`;
+}
+
+function fmtPctNum(p) {
+  const n = round(Number(p) || 0, 3);
+  return `${n}%`;
+}
+
+// Sanity checks on a formula. These are prompts to think, not rules: every product is different.
+function checkFormula(ingredients) {
+  const out = [];
+  const total = totalPct(ingredients);
+  const sumRole = (role) => round(ingredients.filter((i) => i.role === role).reduce((s, i) => s + (Number(i.pct) || 0), 0), 6);
+  const has = (role) => ingredients.some((i) => i.role === role);
+  if (Math.abs(total - 100) > 0.01) out.push({ level: 'bad', text: total > 100 ? `Adds up to ${round(total, 3)}%, which is over 100%.` : `Adds up to ${round(total, 3)}%, so ${round(100 - total, 3)}% is unaccounted for. Tap "Fill water to 100%" if water is the balance.` });
+  const aqueous = has('water') || ingredients.some((i) => i.phase === 'B' && i.role !== 'ph');
+  const oily = has('oil') || has('wax');
+  if (aqueous && !has('preservative')) out.push({ level: 'warn', text: 'No preservative, but the product contains water. Without one, microbes can grow within days.' });
+  if (aqueous && oily && !has('emulsifier')) out.push({ level: 'warn', text: 'Water and oils but no emulsifier, so the product will probably separate.' });
+  if (has('particulate') && !has('dispersant') && sumRole('particulate') >= 5) out.push({ level: 'info', text: 'Large amount of powder with no dispersant. Powders that are not wetted properly clump, which looks whiter and feels gritty.' });
+  if (sumRole('preservative') > 1.5) out.push({ level: 'warn', text: `Preservative totals ${sumRole('preservative')}%. That is above what most are used at; check your supplier's recommended range.` });
+  if (sumRole('fragrance') > 1) out.push({ level: 'info', text: `Fragrance totals ${sumRole('fragrance')}%, which is high for most leave-on products.` });
+  if (sumRole('emulsifier') > 12) out.push({ level: 'info', text: `Emulsifiers total ${sumRole('emulsifier')}%, which is high. It can make the product sticky or irritating.` });
+  if (sumRole('particulate') > 25) out.push({ level: 'warn', text: 'Mineral powder is above 25%. Many regions limit mineral UV filters near this level, so check the rules where you sell.' });
+  const dup = new Set();
+  for (const i of ingredients) { const k = norm(i.name); if (dup.has(k)) { out.push({ level: 'info', text: `"${i.name}" is listed more than once.` }); break; } dup.add(k); }
+  return out;
+}
+
+// Make the water the balance: sets the first water ingredient so the total is exactly 100.
+function fillWater(ingredients) {
+  const list = ingredients.map((i) => ({ ...i }));
+  const idx = list.findIndex((i) => i.role === 'water');
+  if (idx < 0) return { ingredients: list, changed: false, reason: 'Add an ingredient with the role "Water" first.' };
+  const others = round(list.reduce((s, i, n) => s + (n === idx ? 0 : Number(i.pct) || 0), 0), 6);
+  const water = round(100 - others, 4);
+  if (water <= 0) return { ingredients: list, changed: false, reason: 'The other ingredients already add up to 100% or more.' };
+  list[idx].pct = water;
+  return { ingredients: list, changed: true, water };
+}
+
+// ---------- comparing two versions of a formula (or two trials) ----------
+const PROC_FIELDS = [['heatC', 'Heating temperature', '°C'], ['mixRpm', 'Mixing speed', 'rpm'], ['mixMin', 'Mixing time', 'min'], ['cooling', 'Cooling', ''], ['steps', 'Method notes', '']];
+
+function diffFormulas(a, b) {
+  const changes = [];
+  const mapA = new Map(a.ingredients.map((i) => [norm(i.name), i]));
+  const mapB = new Map(b.ingredients.map((i) => [norm(i.name), i]));
+  for (const [k, ib] of mapB) {
+    const ia = mapA.get(k);
+    if (!ia) changes.push({ kind: 'added', what: ib.name, to: Number(ib.pct), text: `Added ${ib.name} at ${fmtPctNum(ib.pct)}` });
+    else {
+      if (round(Number(ia.pct) - Number(ib.pct), 6) !== 0) changes.push({ kind: 'amount', what: ib.name, from: Number(ia.pct), to: Number(ib.pct), text: `${ib.name}: ${fmtPctNum(ia.pct)} → ${fmtPctNum(ib.pct)}` });
+      if (ia.phase !== ib.phase) changes.push({ kind: 'phase', what: ib.name, text: `${ib.name}: moved from phase ${ia.phase} to ${ib.phase}` });
+    }
+  }
+  for (const [k, ia] of mapA) if (!mapB.has(k)) changes.push({ kind: 'removed', what: ia.name, from: Number(ia.pct), text: `Removed ${ia.name} (was ${fmtPctNum(ia.pct)})` });
+  const pa = a.process || {};
+  const pb = b.process || {};
+  // Water is the balance. When something else changed, water moving to keep 100% is a consequence, not a second experiment.
+  const isBalance = (c) => c.kind === 'amount' && (mapB.get(norm(c.what)) || {}).role === 'water';
+  const hasOther = changes.some((c) => !isBalance(c));
+  const kept = hasOther ? changes.filter((c) => !isBalance(c)) : [...changes];
+  changes.length = 0;
+  changes.push(...kept);
+  for (const [f, label, unit] of PROC_FIELDS) {
+    const va = pa[f] ?? null;
+    const vb = pb[f] ?? null;
+    if ((va ?? '') === (vb ?? '')) continue;
+    changes.push({ kind: 'process', what: label, text: f === 'steps' ? `${label} changed` : `${label}: ${va ?? 'not set'}${va !== null && unit ? ` ${unit}` : ''} → ${vb ?? 'not set'}${vb !== null && unit ? ` ${unit}` : ''}` });
+  }
+  return changes;
+}
+
+function scoreDeltas(a, b) {
+  const out = [];
+  for (const m of METRICS) {
+    const va = a.scores ? a.scores[m.key] : null;
+    const vb = b.scores ? b.scores[m.key] : null;
+    if (va === null || va === undefined || vb === null || vb === undefined) continue;
+    out.push({ key: m.key, label: m.label, from: va, to: vb, delta: vb - va });
+  }
+  return out;
+}
+
+function scoreTotal(scores) {
+  const v = METRICS.map((m) => (scores ? scores[m.key] : null)).filter((x) => Number.isFinite(x));
+  return v.length ? v.reduce((s, x) => s + x, 0) : null;
+}
+
+// Experiments where exactly one thing changed between consecutive trials are the ones that teach you something.
+function singleChangeEffects(trials) {
+  const sorted = [...trials].sort((x, y) => x.n - y.n);
+  const out = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const changes = diffFormulas(sorted[i - 1], sorted[i]);
+    const deltas = scoreDeltas(sorted[i - 1], sorted[i]);
+    if (changes.length === 1 && deltas.length) out.push({ from: sorted[i - 1].n, to: sorted[i].n, change: changes[0], deltas });
+  }
+  return out;
+}
+
+// ---------- troubleshooting guide ----------
+// General formulation knowledge, written as "things worth trying first". It does not predict an outcome.
+// "roles" links a cause to ingredient roles, so the guide can point at the matching ingredients in your own formula.
+const PROBLEMS = [
+  {
+    key: 'white-cast', label: 'White cast on skin', short: 'Leaves a white or chalky look after rubbing in',
+    ask: 'Is it the product in the jar that looks very white, or the film left on skin after rubbing in? They have different causes.',
+    causes: [
+      { id: 'particle-grade', lever: 'ingredient', roles: ['particulate'], title: 'Powder grade and particle size', why: 'Large or uncoated mineral particles scatter visible light strongly, which is what you see as white.', tryFirst: 'Try a finer or surface-treated grade of the same mineral. Ask the supplier for the particle size and coating. Some regions have extra rules and labelling for nano-sized particles, so check where you sell.' },
+      { id: 'loading', lever: 'ingredient', roles: ['particulate'], title: 'How much powder', why: 'Cast rises with the amount of mineral powder. Lowering it helps, but sun protection and opacity fall too.', tryFirst: 'Lower the powder in small steps (for example 2 percentage points) and score the result each time. Accept that this is a trade-off, not a free fix.' },
+      { id: 'dispersion', lever: 'process', roles: ['particulate', 'dispersant'], title: 'Powder not fully dispersed', why: 'Clumps of powder scatter more light than the same powder evenly separated, and feel gritty.', tryFirst: 'Wet the powder into the oil phase first (with a dispersant if you have one) and mix at high shear for longer before adding the water phase. Check a thin smear on glass for specks.' },
+      { id: 'tint', lever: 'ingredient', roles: ['particulate'], title: 'Tone matching', why: 'A white film looks less white if it is tinted towards skin tone.', tryFirst: 'Add a very small amount of iron oxides (yellow, red, brown) in the oil phase, for example 0.05 to 0.3%. Go slowly: a little goes a long way.' },
+      { id: 'droplet', lever: 'process', roles: ['emulsifier'], title: 'Large emulsion droplets', why: 'Big oil droplets make the emulsion look opaque and creamy white. Finer droplets look more translucent.', tryFirst: 'Homogenise longer or faster while mixing the phases, and check there is enough emulsifier for the amount of oil.' },
+      { id: 'waxes', lever: 'ingredient', roles: ['wax', 'oil'], title: 'Waxes and fatty alcohols', why: 'Fatty alcohols, stearic acid and waxes give a pearly, opaque white body.', tryFirst: 'Reduce them a little, or replace part of them with a liquid emollient, and watch the thickness as you do.' },
+      { id: 'spread', lever: 'ingredient', roles: ['oil', 'film'], title: 'A thick film on the skin', why: 'If the product does not spread thinly, more powder stays on top.', tryFirst: 'Add or increase a light, fast-spreading emollient or volatile silicone so the film is thinner after rubbing in.' },
+    ],
+  },
+  {
+    key: 'grainy', label: 'Grainy or gritty texture', short: 'Tiny lumps or a sandy feel',
+    ask: 'Does it feel grainy straight after making it, or only after it has stood for a day or more?',
+    causes: [
+      { id: 'cooling', lever: 'process', roles: ['wax'], title: 'Cooling too slowly or unevenly', why: 'Fatty alcohols and waxes can crystallise into grains if they cool slowly without stirring.', tryFirst: 'Keep stirring while it cools, and cool faster (a cold water bath). Note the cooling method in the process section.' },
+      { id: 'melt', lever: 'process', roles: ['wax', 'oil'], title: 'Not fully melted', why: 'The highest-melting wax or butter needs to be fully liquid before the phases are combined.', tryFirst: 'Heat the oil phase to about 5 to 10 °C above the highest melting point and hold until it is clear.' },
+      { id: 'temps', lever: 'process', roles: [], title: 'Phases at different temperatures', why: 'Mixing a hot oil phase into a cool water phase can shock wax out of solution.', tryFirst: 'Bring both phases to the same temperature (within a few degrees) before combining.' },
+      { id: 'powder', lever: 'process', roles: ['particulate', 'thickener'], title: 'Undispersed powder or gum', why: 'Unwetted powder and gum "fish eyes" feel like grit.', tryFirst: 'Pre-mix powders into oil or glycerin to a paste. Sprinkle gums into stirring liquid slowly, or pre-disperse them in glycerin.' },
+      { id: 'too-much-wax', lever: 'ingredient', roles: ['wax'], title: 'Too much wax or butter', why: 'Beyond what the emulsion can hold, wax crystals show up as grain.', tryFirst: 'Reduce the wax or butter a little, or swap part of it for a liquid oil.' },
+    ],
+  },
+  {
+    key: 'separation', label: 'Separates or oil on top', short: 'Water or oil layer, or beads of oil',
+    ask: 'Does it separate in hours, days or only when warm? The faster it happens, the more likely it is the emulsifier or the mixing.',
+    causes: [
+      { id: 'emulsifier', lever: 'ingredient', roles: ['emulsifier'], title: 'Not enough emulsifier, or the wrong type', why: 'The emulsifier has to cover all the oil droplets, and suit an oil-in-water or water-in-oil product.', tryFirst: 'Raise the emulsifier in small steps. Check the supplier datasheet for the type of oils it suits and a typical level for your oil percentage.' },
+      { id: 'shear', lever: 'process', roles: ['emulsifier'], title: 'Not enough mixing energy', why: 'Droplets that stay large merge and rise (creaming and coalescence).', tryFirst: 'Homogenise longer or at a higher speed when the phases are first combined, then stir gently as it cools.' },
+      { id: 'viscosity', lever: 'ingredient', roles: ['thickener', 'wax'], title: 'Water phase too thin', why: 'A thicker external phase slows droplets from moving, so it separates more slowly.', tryFirst: 'Add or raise a thickener (gum, polymer) or fatty alcohol a little.' },
+      { id: 'oil-load', lever: 'ingredient', roles: ['oil', 'wax'], title: 'Too much oil for the emulsifier', why: 'More oil needs more emulsifier and structure to hold it.', tryFirst: 'Lower the oil phase, or raise emulsifier and thickener to match it.' },
+      { id: 'electrolyte-ph', lever: 'ingredient', roles: ['active', 'ph', 'thickener'], title: 'Salts, acids or pH', why: 'Many emulsifiers and polymers lose strength in the presence of salts or outside their pH range.', tryFirst: 'Check pH and the supplier\'s limits. Add salty or acidic actives at the end and in small steps.' },
+    ],
+  },
+  {
+    key: 'too-thin', label: 'Too thin or runny', short: 'Pours instead of holding a shape',
+    ask: 'Was it thin straight away, or did it thin out over time or in the heat?',
+    causes: [
+      { id: 'structure', lever: 'ingredient', roles: ['wax', 'thickener'], title: 'Not enough thickener or fatty alcohol', why: 'These give the product body.', tryFirst: 'Raise fatty alcohol (for example cetearyl alcohol) or a thickener in small steps.' },
+      { id: 'hydrate', lever: 'process', roles: ['thickener'], title: 'Thickener not fully hydrated or activated', why: 'Gums need time to hydrate; polymers like carbomer need neutralising to thicken.', tryFirst: 'Mix longer, let it rest, and check pH if the thickener needs neutralising.' },
+      { id: 'salt', lever: 'ingredient', roles: ['active', 'ph'], title: 'Salts thinning the gel', why: 'Salts can collapse some polymer thickeners.', tryFirst: 'Reduce the salt, or choose a salt-tolerant thickener.' },
+      { id: 'hot-fill', lever: 'process', roles: [], title: 'Measured while warm', why: 'Creams are thinner when warm and thicken as they cool and rest.', tryFirst: 'Judge the thickness after 24 hours at room temperature before changing the formula.' },
+    ],
+  },
+  {
+    key: 'too-thick', label: 'Too thick or stiff', short: 'Hard to spread, heavy or waxy',
+    ask: 'Does it feel stiff in the jar, or does it drag when you rub it on?',
+    causes: [
+      { id: 'waxy', lever: 'ingredient', roles: ['wax'], title: 'Too much wax or fatty alcohol', why: 'These set the body of the cream.', tryFirst: 'Lower them in small steps, or replace part with a liquid emollient.' },
+      { id: 'polymer', lever: 'ingredient', roles: ['thickener'], title: 'Too much polymer or gum', why: 'Gums and polymers can make a gummy, stringy feel.', tryFirst: 'Reduce the thickener a little.' },
+      { id: 'cool-shear', lever: 'process', roles: [], title: 'Stirred or cooled differently', why: 'Cooling with stirring versus standing, and mixing speed, change the final thickness.', tryFirst: 'Keep cooling and mixing the same on each trial so only your formula change shows up.' },
+    ],
+  },
+  {
+    key: 'sticky', label: 'Sticky or tacky feel', short: 'Feels tacky on the skin',
+    ask: 'Is the stickiness immediate, or does it build up as it dries?',
+    causes: [
+      { id: 'humectant', lever: 'ingredient', roles: ['humectant'], title: 'High humectant level', why: 'Glycerin and similar draw water and feel tacky at higher levels.', tryFirst: 'Lower glycerin (for example to 3 to 5%), or swap part for a lighter humectant.' },
+      { id: 'polymer-film', lever: 'ingredient', roles: ['thickener', 'film'], title: 'Polymers and film formers', why: 'These leave a tacky film as they dry.', tryFirst: 'Reduce them a little, or add a small amount of a dry-feel powder (silica, starch).' },
+      { id: 'emulsifier-sticky', lever: 'ingredient', roles: ['emulsifier'], title: 'High emulsifier level', why: 'Surplus emulsifier can leave a soapy or sticky residue.', tryFirst: 'Lower the emulsifier to the least amount that keeps it stable.' },
+    ],
+  },
+  {
+    key: 'greasy', label: 'Greasy or heavy', short: 'Leaves an oily shine for a long time',
+    ask: 'Is it greasy while rubbing in, or the oily film that remains afterwards?',
+    causes: [
+      { id: 'oil-level', lever: 'ingredient', roles: ['oil', 'wax'], title: 'High oil or butter level', why: 'More oil phase means a more occlusive, greasy feel.', tryFirst: 'Lower the oil phase in small steps.' },
+      { id: 'oil-type', lever: 'ingredient', roles: ['oil'], title: 'Heavy oils', why: 'Heavy, slow-spreading oils sit on the skin.', tryFirst: 'Swap part of the oil for a lighter ester or silicone, then compare the feel.' },
+      { id: 'powder-dry', lever: 'ingredient', roles: ['particulate'], title: 'Needs a dry-down', why: 'Small amounts of silica or starch absorb surface oil.', tryFirst: 'Try 1 to 2% of an oil-absorbing powder.' },
+    ],
+  },
+  {
+    key: 'discolour', label: 'Yellows, darkens or smells off over time', short: 'Colour or smell changes in storage',
+    ask: 'Did it change in light, in heat, or in a closed drawer? And does the smell turn rancid or just different?',
+    causes: [
+      { id: 'oxidation', lever: 'ingredient', roles: ['oil', 'antioxidant'], title: 'Oils going rancid', why: 'Unsaturated oils oxidise, which yellows the product and gives a stale smell.', tryFirst: 'Add an antioxidant to the oil phase (for example tocopherol), or use a more stable oil. Store away from heat and light.' },
+      { id: 'light-heat', lever: 'process', roles: [], title: 'Storage', why: 'Heat and light speed up nearly every change.', tryFirst: 'Compare samples stored warm, at room temperature and in the fridge, so you know whether it is the storage or the formula.' },
+      { id: 'micro', lever: 'ingredient', roles: ['preservative'], title: 'Microbial growth', why: 'A sour smell, colour spots or fuzz can be microbes.', tryFirst: 'Stop using the sample. Check the preservative type, amount and the pH it works at, and clean your equipment properly. Preservative systems need proper lab testing before you sell anything.' },
+    ],
+  },
+  {
+    key: 'bubbles', label: 'Air bubbles in the product', short: 'Tiny bubbles or a foamy look',
+    ask: 'Do the bubbles stay, or do they rise out after standing?',
+    causes: [
+      { id: 'fast-mix', lever: 'process', roles: [], title: 'Mixing too fast at the surface', why: 'A vortex pulls air into the product.', tryFirst: 'Keep the mixer head submerged and lower the speed once the phases are combined.' },
+      { id: 'rest', lever: 'process', roles: [], title: 'No time to de-aerate', why: 'Air escapes slowly from viscous products.', tryFirst: 'Let it stand covered before filling, or warm it slightly. A vacuum mixer is the professional fix.' },
+    ],
+  },
+];
+
+const findProblem = (key) => PROBLEMS.find((p) => p.key === key) || null;
+
+// Which of the user's own ingredients does a cause point at?
+function ingredientsForCause(cause, ingredients) {
+  const roles = cause.roles || [];
+  return ingredients.filter((i) => roles.includes(i.role));
+}
+
+// A short text the user can share or paste.
+function formulaText(f, batchG, labName = '') {
+  const lines = [f.name, `${labName ? `${labName} · ` : ''}Version ${f.version}, batch of ${round(batchG, 3)} g`, ''];
+  for (const p of PHASES) {
+    const group = scaleToGrams(f, batchG).filter((i) => i.phase === p.key);
+    if (!group.length) continue;
+    lines.push(p.label);
+    for (const i of group) lines.push(`  ${i.name}: ${fmtPctNum(i.pct)} = ${fmtGrams(i.grams)}`);
+  }
+  const proc = f.process || {};
+  const bits = [proc.heatC != null ? `heat to ${proc.heatC} °C` : null, proc.mixRpm != null ? `${proc.mixRpm} rpm` : null, proc.mixMin != null ? `${proc.mixMin} min` : null, proc.cooling || null].filter(Boolean);
+  if (bits.length) lines.push('', `Process: ${bits.join(', ')}`);
+  if (proc.steps) lines.push('', proc.steps);
+  return lines.join('\n');
+}
+
+const STARTER_FORMULAS = [
+  {
+    name: 'Basic moisturising cream (example)',
+    productType: 'Cream',
+    description: 'A plain oil-in-water cream to practise with. An example to edit, not a tested product.',
+    batchG: 200,
+    ingredients: [
+      { name: 'Caprylic/capric triglyceride', pct: 8, phase: 'A', role: 'oil', note: '' },
+      { name: 'Cetearyl alcohol', pct: 3, phase: 'A', role: 'wax', note: '' },
+      { name: 'Glyceryl stearate citrate', pct: 4, phase: 'A', role: 'emulsifier', note: 'or the emulsifier you use' },
+      { name: 'Water (aqua)', pct: 79.7, phase: 'B', role: 'water', note: 'balance' },
+      { name: 'Glycerin', pct: 4, phase: 'B', role: 'humectant', note: '' },
+      { name: 'Xanthan gum', pct: 0.3, phase: 'B', role: 'thickener', note: 'pre-mix in the glycerin' },
+      { name: 'Phenoxyethanol and ethylhexylglycerin', pct: 0.8, phase: 'C', role: 'preservative', note: 'use your supplier\'s range' },
+      { name: 'Tocopherol (vitamin E)', pct: 0.2, phase: 'C', role: 'antioxidant', note: '' },
+    ],
+    process: { heatC: 75, mixRpm: 3000, mixMin: 3, cooling: 'Stir while cooling to 40 °C', steps: 'Heat A and B separately to 75 °C.\nAdd A to B while mixing, then mix at high speed for 3 minutes.\nStir gently while cooling to 40 °C.\nAdd C, mix, check the pH and fill.' },
+  },
+  {
+    name: 'Mineral sunscreen lotion (example)',
+    productType: 'Sunscreen',
+    description: 'A starting point to experiment with white cast. No SPF is claimed: real SPF needs lab testing. An example to edit, not a tested product.',
+    batchG: 200,
+    ingredients: [
+      { name: 'Caprylic/capric triglyceride', pct: 10, phase: 'A', role: 'oil', note: '' },
+      { name: 'C12-15 alkyl benzoate', pct: 5, phase: 'A', role: 'oil', note: '' },
+      { name: 'Zinc oxide', pct: 15, phase: 'A', role: 'particulate', note: 'coated grade' },
+      { name: 'Polyglyceryl-3 polyricinoleate', pct: 1.5, phase: 'A', role: 'dispersant', note: '' },
+      { name: 'Cetearyl glucoside', pct: 4, phase: 'A', role: 'emulsifier', note: 'or the emulsifier you use' },
+      { name: 'Cetearyl alcohol', pct: 2, phase: 'A', role: 'wax', note: '' },
+      { name: 'Water (aqua)', pct: 58.2, phase: 'B', role: 'water', note: 'balance' },
+      { name: 'Glycerin', pct: 3, phase: 'B', role: 'humectant', note: '' },
+      { name: 'Xanthan gum', pct: 0.3, phase: 'B', role: 'thickener', note: '' },
+      { name: 'Phenoxyethanol and ethylhexylglycerin', pct: 0.8, phase: 'C', role: 'preservative', note: 'use your supplier\'s range' },
+      { name: 'Tocopherol (vitamin E)', pct: 0.2, phase: 'C', role: 'antioxidant', note: '' },
+    ],
+    process: { heatC: 75, mixRpm: 5000, mixMin: 5, cooling: 'Stir while cooling to 40 °C', steps: 'Disperse the zinc oxide into the oils and dispersant at high speed until smooth.\nHeat A and B separately to 75 °C.\nAdd A to B while mixing, then homogenise for 5 minutes.\nStir gently while cooling to 40 °C.\nAdd C, mix, check the pH and fill.' },
+  },
+];
+
+return { ROLES, ROLE_KEYS, roleLabel, PHASES, PHASE_KEYS, phaseLabel, COMMON_INGREDIENTS, METRICS, totalPct, scaleToGrams, fmtGrams, fmtPctNum, checkFormula, fillWater, diffFormulas, scoreDeltas, scoreTotal, singleChangeEffects, PROBLEMS, findProblem, ingredientsForCause, formulaText, STARTER_FORMULAS };
+})();
 const __m_js_store_js = (() => {
 const { RECIPE_UNITS, CONC, addDays } = __m_js_calc_js;
+const { ROLE_KEYS, PHASE_KEYS, METRICS, PROBLEMS } = __m_js_formulas_js;
 // Local-first data layer. Everything lives on this device, in one JSON document in localStorage.
 // The storage object is injectable so the logic can be tested without a browser.
+
 
 const SCHEMA = 1;
 const APP_ID = 'labkit-recipes';
 const KEY = 'lkr:v1';
-const LIMITS = { recipes: 500, batches: 5000, customReagents: 300, history: 20, ingredients: 60 };
+const LIMITS = { recipes: 500, batches: 5000, customReagents: 300, history: 20, ingredients: 60, formulas: 200, trials: 100, formulaIngredients: 40 };
 
 class ValidationError extends Error {}
 
@@ -741,6 +1080,64 @@ function cleanRecipe(input) {
   };
 }
 
+// ---------- cosmetic formulations: ingredients in % w/w, a process, and trials ----------
+function cleanFormulaIngredient(i, n = 0) {
+  const where = `Ingredient ${n + 1}`;
+  if (!i || typeof i !== 'object') throw new ValidationError(`${where} is invalid.`);
+  return {
+    name: str(i.name, `${where} name`, { required: true, max: 120 }),
+    pct: num(i.pct, `${where} percentage`, { min: 0.0001, max: 100, required: true }),
+    phase: PHASE_KEYS.includes(i.phase) ? i.phase : 'A',
+    role: ROLE_KEYS.includes(i.role) ? i.role : 'other',
+    note: str(i.note, `${where} note`, { max: 200 }),
+  };
+}
+function cleanProcess(p) {
+  p = p && typeof p === 'object' ? p : {};
+  return {
+    heatC: num(p.heatC, 'Heating temperature', { min: 0, max: 300 }),
+    mixRpm: num(p.mixRpm, 'Mixing speed', { min: 0, max: 30000, int: true }),
+    mixMin: num(p.mixMin, 'Mixing time', { min: 0, max: 1000 }),
+    cooling: str(p.cooling, 'Cooling', { max: 120 }),
+    steps: str(p.steps, 'Method notes', { max: 4000 }),
+  };
+}
+function cleanFormula(input) {
+  if (!input || typeof input !== 'object') throw new ValidationError('Formula is invalid.');
+  const list = input.ingredients;
+  if (!Array.isArray(list) || list.length < 1 || list.length > LIMITS.formulaIngredients) throw new ValidationError(`A formula needs 1 to ${LIMITS.formulaIngredients} ingredients.`);
+  return {
+    name: str(input.name, 'Name', { required: true, max: 120 }),
+    productType: str(input.productType, 'Product type', { max: 40 }),
+    description: str(input.description, 'Description', { max: 1000 }),
+    batchG: num(input.batchG ?? 100, 'Standard batch size', { min: 0.01, max: 1e7, required: true }),
+    ingredients: list.map((x, n) => cleanFormulaIngredient(x, n)),
+    process: cleanProcess(input.process),
+  };
+}
+function cleanScores(sc) {
+  const out = {};
+  for (const m of METRICS) out[m.key] = num(sc && sc[m.key], `${m.label} score`, { min: 1, max: 5, int: true });
+  return out;
+}
+function cleanTrial(t) {
+  if (!t || typeof t !== 'object') throw new ValidationError('Trial is invalid.');
+  const known = new Set(PROBLEMS.map((p) => p.key));
+  const list = t.ingredients;
+  if (!Array.isArray(list) || list.length < 1 || list.length > LIMITS.formulaIngredients) throw new ValidationError('A trial needs its ingredient list.');
+  return {
+    madeAt: typeof t.madeAt === 'string' && !Number.isNaN(Date.parse(t.madeAt)) ? t.madeAt : nowIso(),
+    formulaVersion: num(t.formulaVersion ?? 1, 'Version', { min: 1, int: true }) || 1,
+    batchG: num(t.batchG, 'Batch size', { min: 0.01, max: 1e7 }),
+    ingredients: list.map((x, n) => cleanFormulaIngredient(x, n)),
+    process: cleanProcess(t.process),
+    scores: cleanScores(t.scores),
+    issues: (Array.isArray(t.issues) ? t.issues : []).filter((k) => known.has(k)).slice(0, 12).filter((k, i, a) => a.indexOf(k) === i),
+    notes: str(t.notes, 'Notes', { max: 1500 }),
+    ph: num(t.ph, 'pH', { min: 0, max: 14 }),
+  };
+}
+
 const uid = () => (globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
 const nowIso = () => new Date().toISOString();
 const clone = (v) => JSON.parse(JSON.stringify(v));
@@ -750,6 +1147,7 @@ function emptyData() {
     schema: SCHEMA,
     settings: { labName: '', initials: '', tolerancePct: 2, theme: 'auto' },
     recipes: [],
+    formulas: [],
     batches: [],
     customReagents: [],
     counters: {},
@@ -874,6 +1272,84 @@ function createStore(storage = browserStorage()) {
       if (rec && !data.recipes.some((r) => r.id === rec.id)) { data.recipes.push(rec); save(); }
     },
 
+    // ----- cosmetic formulations and their trials -----
+    formulas: () => [...data.formulas].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })),
+    getFormula: (id) => data.formulas.find((f) => f.id === id) || null,
+    saveFormula(input, id = null) {
+      const clean = cleanFormula(input);
+      const now = nowIso();
+      if (id) {
+        const cur = data.formulas.find((f) => f.id === id);
+        if (!cur) throw new ValidationError('That formula no longer exists.');
+        const history = [{ version: cur.version, savedAt: cur.updatedAt, snapshot: formulaSnapshot(cur) }, ...(cur.history || [])].slice(0, LIMITS.history);
+        Object.assign(cur, clean, { version: cur.version + 1, updatedAt: now, history });
+        save();
+        return cur;
+      }
+      if (data.formulas.length >= LIMITS.formulas) throw new ValidationError(`You have reached the limit of ${LIMITS.formulas} formulas.`);
+      const f = { id: uid(), ...clean, version: 1, history: [], trials: [], createdAt: now, updatedAt: now };
+      data.formulas.push(f);
+      save();
+      return f;
+    },
+    restoreFormulaVersion(id, version) {
+      const cur = data.formulas.find((f) => f.id === id);
+      const h = cur && (cur.history || []).find((x) => x.version === version);
+      if (!h) throw new ValidationError('That version is not available.');
+      return api.saveFormula(h.snapshot, id);
+    },
+    duplicateFormula(id) {
+      const cur = data.formulas.find((f) => f.id === id);
+      if (!cur) throw new ValidationError('That formula no longer exists.');
+      return api.saveFormula({ ...formulaSnapshot(cur), name: `${cur.name} (copy)`.slice(0, 120) });
+    },
+    deleteFormula(id) {
+      const i = data.formulas.findIndex((f) => f.id === id);
+      if (i < 0) return null;
+      const [gone] = data.formulas.splice(i, 1);
+      save();
+      return gone;
+    },
+    undeleteFormula(f) { if (f && !data.formulas.some((x) => x.id === f.id)) { data.formulas.push(f); save(); } },
+    trials(formulaId) {
+      const f = data.formulas.find((x) => x.id === formulaId);
+      return f ? [...f.trials].sort((a, b) => b.n - a.n) : [];
+    },
+    getTrial(formulaId, trialId) {
+      const f = data.formulas.find((x) => x.id === formulaId);
+      return (f && f.trials.find((t) => t.id === trialId)) || null;
+    },
+    // A trial freezes the ingredients and process as they were, so later edits never rewrite history.
+    addTrial(formulaId, input) {
+      const f = data.formulas.find((x) => x.id === formulaId);
+      if (!f) throw new ValidationError('That formula no longer exists.');
+      if (f.trials.length >= LIMITS.trials) throw new ValidationError(`A formula can hold ${LIMITS.trials} trials. Delete old ones first.`);
+      const clean = cleanTrial(input);
+      const t = { id: uid(), n: f.trials.reduce((m, x) => Math.max(m, x.n), 0) + 1, ...clean };
+      f.trials.push(t);
+      save();
+      return t;
+    },
+    updateTrial(formulaId, trialId, patch) {
+      const t = api.getTrial(formulaId, trialId);
+      if (!t) throw new ValidationError('That trial no longer exists.');
+      Object.assign(t, cleanTrial({ ...t, ...patch }));
+      save();
+      return t;
+    },
+    deleteTrial(formulaId, trialId) {
+      const f = data.formulas.find((x) => x.id === formulaId);
+      const i = f ? f.trials.findIndex((t) => t.id === trialId) : -1;
+      if (i < 0) return null;
+      const [gone] = f.trials.splice(i, 1);
+      save();
+      return gone;
+    },
+    undeleteTrial(formulaId, t) {
+      const f = data.formulas.find((x) => x.id === formulaId);
+      if (f && t && !f.trials.some((x) => x.id === t.id)) { f.trials.push(t); save(); }
+    },
+
     // ----- batches (records of what was made) -----
     batches: () => [...data.batches].sort((a, b) => (a.madeAt < b.madeAt ? 1 : -1)),
     getBatch: (id) => data.batches.find((b) => b.id === id) || null,
@@ -948,7 +1424,7 @@ function createStore(storage = browserStorage()) {
     exportData() {
       data.lastBackup = nowIso();
       save();
-      return { app: APP_ID, schema: SCHEMA, exportedAt: data.lastBackup, data: { settings: data.settings, recipes: data.recipes, batches: data.batches, customReagents: data.customReagents, counters: data.counters } };
+      return { app: APP_ID, schema: SCHEMA, exportedAt: data.lastBackup, data: { settings: data.settings, recipes: data.recipes, formulas: data.formulas, batches: data.batches, customReagents: data.customReagents, counters: data.counters } };
     },
     // mode "merge": keep what is here, add or update from the file. "replace": the file becomes everything.
     importData(file, mode = 'merge') {
@@ -957,24 +1433,38 @@ function createStore(storage = browserStorage()) {
       next.activeBench = mode === 'replace' ? null : data.activeBench;
       next.flags = mode === 'replace' ? { ...emptyData().flags, welcomed: true } : data.flags;
       next.lastBackup = data.lastBackup;
-      const counts = { recipesAdded: 0, recipesUpdated: 0, batchesAdded: 0, reagentsAdded: 0 };
+      const counts = { recipesAdded: 0, recipesUpdated: 0, batchesAdded: 0, reagentsAdded: 0, formulasAdded: 0, formulasUpdated: 0 };
       for (const r of report.recipes) {
         const have = next.recipes.find((x) => x.id === r.id);
         if (!have) { next.recipes.push(r); counts.recipesAdded++; } else if (r.updatedAt > have.updatedAt) { Object.assign(have, r); counts.recipesUpdated++; }
+      }
+      for (const f of report.formulas) {
+        const have = next.formulas.find((x) => x.id === f.id);
+        if (!have) { next.formulas.push(f); counts.formulasAdded++; } else {
+          // keep trials from both sides; the newer description of the formula wins
+          const ids = new Set(have.trials.map((t) => t.id));
+          const extra = f.trials.filter((t) => !ids.has(t.id));
+          if (f.updatedAt > have.updatedAt) { Object.assign(have, f, { trials: have.trials }); counts.formulasUpdated++; }
+          have.trials.push(...extra);
+        }
       }
       for (const b of report.batches) if (!next.batches.some((x) => x.id === b.id)) { next.batches.push(b); counts.batchesAdded++; }
       for (const c of report.customReagents) if (!next.customReagents.some((x) => x.id === c.id)) { next.customReagents.push(c); counts.reagentsAdded++; }
       for (const [y, n] of Object.entries(report.counters)) next.counters[y] = Math.max(next.counters[y] || 0, n);
       if (mode === 'replace') next.settings = { ...next.settings, ...report.settings };
-      if (next.recipes.length > LIMITS.recipes || next.batches.length > LIMITS.batches) throw new ValidationError('That file would exceed the size limits.');
+      if (next.recipes.length > LIMITS.recipes || next.batches.length > LIMITS.batches || next.formulas.length > LIMITS.formulas) throw new ValidationError('That file would exceed the size limits.');
       data = next;
       save();
       return counts;
     },
     eraseAll() { data = emptyData(); temp = null; if (storage) { try { storage.removeItem(KEY); } catch { /* ignore */ } } save(); },
-    stats: () => ({ recipes: data.recipes.length, batches: data.batches.length, bytes: persistent && storage ? (storage.getItem(KEY) || '').length : 0 }),
+    stats: () => ({ recipes: data.recipes.length, formulas: data.formulas.length, batches: data.batches.length, bytes: persistent && storage ? (storage.getItem(KEY) || '').length : 0 }),
   };
   return api;
+}
+
+function formulaSnapshot(f) {
+  return { name: f.name, productType: f.productType, description: f.description, batchG: f.batchG, ingredients: clone(f.ingredients), process: clone(f.process) };
 }
 
 function snapshotOf(r) {
@@ -994,6 +1484,19 @@ function validateExport(file) {
     const history = Array.isArray(r.history) ? r.history.slice(0, LIMITS.history).flatMap((h) => { try { return [{ version: num(h.version, 'v', { int: true, min: 1, required: true }), savedAt: str(h.savedAt, 'date', { max: 40 }), snapshot: cleanRecipe(h.snapshot) }]; } catch { return []; } }) : [];
     const stamp = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : nowIso());
     return { id: r.id, ...clean, version: num(r.version ?? 1, 'Version', { int: true, min: 1, required: true }), history, createdAt: stamp(r.createdAt), updatedAt: stamp(r.updatedAt), lastMadeAt: r.lastMadeAt ? stamp(r.lastMadeAt) : null };
+  });
+  const formulas = list(d.formulas, LIMITS.formulas).map((f, n) => {
+    const clean = cleanFormula(f);
+    if (typeof f.id !== 'string' || !f.id || f.id.length > 60) throw new ValidationError(`Formula ${n + 1} in the file has no valid id.`);
+    const stamp = (v) => (typeof v === 'string' && !Number.isNaN(Date.parse(v)) ? v : nowIso());
+    const history = Array.isArray(f.history) ? f.history.slice(0, LIMITS.history).flatMap((x) => { try { return [{ version: num(x.version, 'v', { int: true, min: 1, required: true }), savedAt: str(x.savedAt, 'date', { max: 40 }), snapshot: cleanFormula(x.snapshot) }]; } catch { return []; } }) : [];
+    const seen = new Set();
+    const trials = list(f.trials, LIMITS.trials).map((t, k) => {
+      if (!t || typeof t.id !== 'string' || !t.id || t.id.length > 60 || seen.has(t.id)) throw new ValidationError(`A trial of formula ${n + 1} has no valid id.`);
+      seen.add(t.id);
+      return { id: t.id, n: num(t.n ?? k + 1, 'Trial number', { int: true, min: 1, max: 1e6, required: true }), ...cleanTrial(t) };
+    });
+    return { id: f.id, ...clean, version: num(f.version ?? 1, 'Version', { int: true, min: 1, required: true }), history, trials, createdAt: stamp(f.createdAt), updatedAt: stamp(f.updatedAt) };
   });
   const batches = list(d.batches, LIMITS.batches).map((b, n) => {
     if (!b || typeof b !== 'object' || typeof b.id !== 'string' || !b.id || b.id.length > 60) throw new ValidationError(`Batch ${n + 1} in the file has no valid id.`);
@@ -1022,10 +1525,10 @@ function validateExport(file) {
     if (typeof d.settings.initials === 'string') settings.initials = d.settings.initials.slice(0, 8);
     if (Number.isFinite(d.settings.tolerancePct) && d.settings.tolerancePct >= 0.1 && d.settings.tolerancePct <= 20) settings.tolerancePct = d.settings.tolerancePct;
   }
-  return { recipes, batches, customReagents, counters, settings };
+  return { recipes, formulas, batches, customReagents, counters, settings };
 }
 
-return { SCHEMA, APP_ID, LIMITS, ValidationError, cleanIngredient, cleanRecipe, emptyData, browserStorage, createStore, validateExport };
+return { SCHEMA, APP_ID, LIMITS, ValidationError, cleanIngredient, cleanRecipe, cleanFormulaIngredient, cleanProcess, cleanFormula, cleanTrial, emptyData, browserStorage, createStore, validateExport };
 })();
 const __m_js_reagents_js = (() => {
 
@@ -2904,14 +3407,14 @@ function renderSettings(ctx) {
       try {
         const c = store.importData(parsed, mode);
         sheet.close();
-        toast(`Restored: ${c.recipesAdded} new and ${c.recipesUpdated} updated recipes, ${c.batchesAdded} batches.`);
+        toast(`Restored: ${c.recipesAdded} new and ${c.recipesUpdated} updated recipes, ${c.formulasAdded} formulas, ${c.batchesAdded} batches.`);
         ctx.rerender();
       } catch (e) { if (!(e instanceof ValidationError)) throw e; sheet.close(); toast(e.message, { kind: 'error', ms: 7000 }); }
     }
   });
 
   async function erase() {
-    if (!(await confirmSheet({ title: 'Erase everything?', message: 'This deletes all recipes, batch records and settings on this device. It cannot be undone. Have you backed up?', confirmLabel: 'Erase everything', danger: true }))) return;
+    if (!(await confirmSheet({ title: 'Erase everything?', message: 'This deletes all recipes, formulas, batch records and settings on this device. It cannot be undone. Have you backed up?', confirmLabel: 'Erase everything', danger: true }))) return;
     store.eraseAll();
     toast('Everything was erased.');
     go('#/');
@@ -2927,12 +3430,16 @@ function renderSettings(ctx) {
       h('div', { class: 'card' },
         h('h2', null, 'Backup and restore'),
         h('p', { class: 'muted' }, 'Your recipes live only on this device, in this browser. If you clear your browser data they are gone, so back up now and then.'),
-        h('p', { class: 'small' }, last ? `Last backup: ${fmtDate(last)}.` : 'You have not made a backup yet.', ` You have ${stats.recipes} recipes and ${stats.batches} batch records.`),
+        h('p', { class: 'small' }, last ? `Last backup: ${fmtDate(last)}.` : 'You have not made a backup yet.', ` You have ${stats.recipes} recipes, ${stats.formulas} formulas and ${stats.batches} batch records.`),
         h('div', { class: 'row-stack' },
           h('button', { type: 'button', class: 'btn primary', onclick: backup }, icon('download', 18), 'Download a backup'),
           h('button', { type: 'button', class: 'btn', onclick: () => fileInput.click() }, icon('upload', 18), 'Restore from a backup file')),
         fileInput,
         !store.persistent ? h('div', { class: 'note bad' }, 'This browser is not saving data right now (private window or blocked storage).') : null),
+      h('div', { class: 'card' },
+        h('h2', null, 'Reagent library'),
+        h('p', { class: 'muted small' }, 'About 70 common lab reagents with safety notes, plus your own.'),
+        h('div', { class: 'row-stack' }, h('a', { class: 'btn', href: '#/library' }, icon('library', 18), 'Open the reagent library'))),
       h('div', { class: 'card' },
         h('h2', null, 'Help'),
         h('div', { class: 'row-stack' }, h('a', { class: 'btn', href: '#/help' }, 'How it works, install on your phone, glossary'))),
@@ -3006,7 +3513,7 @@ function renderHelp() {
     el: h('div', null,
       section('Make your first solution (2 minutes)',
         steps([
-          'On the Recipes tab, tap "Add starter recipes". Open "1× PBS".',
+          'On the Solutions tab, tap "Add starter recipes". Open "1× PBS".',
           'Choose how much to make (tap a volume such as 500 mL). The amounts update at once.',
           'Tap "Make it". For each ingredient, weigh it and type what the balance shows.',
           'If you went over or under, tap "Fix it" and pick the smartest option.',
@@ -3019,6 +3526,16 @@ function renderHelp() {
           h('li', null, h('b', null, 'A little off / Too far off: '), 'tap "Fix it". It can make a slightly different final volume so your solution still has exactly the right concentration, and recalculate everything left to add.'),
           h('li', null, h('b', null, 'Best compromise: '), 'when several ingredients are slightly off, it finds the one volume that makes the worst of them as small as possible.'),
           h('li', null, h('b', null, 'Keep and accept: '), 'the record then shows the real concentration you made, so nobody is misled later.'))),
+      section('Formulas: creams, lotions and sunscreens',
+        h('p', null, 'The Formulas tab is for products written as percentages by weight. The Solutions tab is for buffers and lab solutions made to a volume.'),
+        steps([
+          'Open Formulas and add the two examples, or write your own. Give each ingredient a percentage, a phase (A and B are heated, C is added cool) and a role.',
+          'Open a formula and enter a batch size in grams. The amounts for every ingredient update at once.',
+          'Make a small batch, then tap "Log a trial". Score the skin look, texture, feel and stability, and tick any problems.',
+          'If something is wrong (white cast, grainy, separating...), tap "Fix a problem". It lists the usual causes, pointing at the matching ingredients in your formula.',
+          'Change one thing, make another batch, and log it. Compare the two trials to see exactly what changed and what it did.',
+        ]),
+        h('p', { class: 'muted small', style: 'margin-top:10px' }, 'The guide suggests what is usually worth trying. It cannot predict how your own ingredients behave, and nothing replaces stability, preservative and safety testing before you sell a product.')),
       section('Swap form',
         h('p', null, 'If you have magnesium chloride anhydrous but the recipe says hexahydrate (or a similar pair), tap "Swap form" on that ingredient. The weight changes so you still get the same amount of the compound.')),
       section('Your data and backups',
@@ -3041,6 +3558,505 @@ function renderHelp() {
 
 return { renderHelp };
 })();
+const __m_js_formula_ui_js = (() => {
+const { h } = __m_js_ui_js;
+const { METRICS, findProblem } = __m_js_formulas_js;
+// Small pieces shared by the formula screens.
+
+
+function scorePills(scores) {
+  const items = METRICS.filter((m) => scores && Number.isFinite(scores[m.key]));
+  if (!items.length) return h('span', { class: 'hint' }, 'Not scored yet');
+  return h('span', { class: 'row', style: 'gap:6px' }, items.map((m) => h('span', { class: `badge ${scores[m.key] >= 4 ? 'ok' : scores[m.key] <= 2 ? 'bad' : 'warn'}` }, `${m.label} ${scores[m.key]}/5`)));
+}
+
+function issueBadges(keys) {
+  const list = (keys || []).map(findProblem).filter(Boolean);
+  return list.length ? h('span', { class: 'row', style: 'gap:6px' }, list.map((p) => h('span', { class: 'badge warn' }, p.label))) : null;
+}
+
+function changeList(changes) {
+  return h('ul', { style: 'margin:6px 0;padding-left:20px' }, changes.map((c) => h('li', { style: 'margin:3px 0' }, c.text)));
+}
+
+const deltaText = (d) => (d > 0 ? `+${d}` : String(d));
+
+return { scorePills, issueBadges, changeList, deltaText };
+})();
+const __m_js_pages_formulas_js = (() => {
+const { h, icon, toast, numOf, numInput, openSheet, confirmSheet, shareOrCopy, fmtDate, field, selectEl } = __m_js_ui_js;
+const { store, go } = __m_js_state_js;
+const { STARTER_FORMULAS, PHASES, checkFormula, totalPct, scaleToGrams, fmtGrams, fmtPctNum, formulaText, roleLabel, singleChangeEffects } = __m_js_formulas_js;
+const { scorePills, issueBadges, deltaText } = __m_js_formula_ui_js;
+
+
+
+
+const PRESETS = [50, 100, 250, 500, 1000];
+const stepFor = (v) => (v < 100 ? 10 : v < 1000 ? 50 : 100);
+
+function renderFormulas(ctx) {
+  const el = h('div');
+  const formulas = store.formulas();
+
+  function addExamples() {
+    let added = 0;
+    for (const s of STARTER_FORMULAS) if (!store.formulas().some((f) => f.name === s.name)) { store.saveFormula(s); added++; }
+    toast(added ? `Added ${added} example formulas. Open one to see how it works.` : 'The examples are already here.');
+    ctx.rerender();
+  }
+
+  if (!formulas.length) {
+    el.append(h('div', { class: 'card welcome' },
+      h('h2', null, 'Develop a product, one change at a time'),
+      h('p', null, 'Write down a cream, lotion or sunscreen as percentages. Scale it to any batch size in grams. Log each trial with how it looked and felt, then compare trials to see what a change did.'),
+      h('div', { class: 'row-stack' },
+        h('button', { type: 'button', class: 'btn primary', onclick: addExamples }, 'Add two example formulas'),
+        h('a', { class: 'btn', href: '#/formula/new' }, 'Write my own formula')),
+      h('p', { class: 'hint', style: 'margin-top:10px' }, 'Stays on this device, like everything else here. Buffers and lab solutions are on the Recipes tab.')));
+  } else {
+    el.append(h('div', { class: 'list' }, formulas.map((f) => {
+      const trials = store.trials(f.id);
+      const last = trials[0];
+      return h('a', { class: 'item', href: `#/formula/${f.id}` },
+        h('div', { class: 'title' }, f.name),
+        h('div', { class: 'sub' }, [f.productType, `v${f.version}`, `${trials.length} trial${trials.length === 1 ? '' : 's'}`, last ? `last ${fmtDate(last.madeAt)}` : null].filter(Boolean).join(' · ')),
+        last ? h('div', { style: 'margin-top:6px' }, scorePills(last.scores)) : null);
+    })),
+    h('a', { class: 'fab', href: '#/formula/new', 'aria-label': 'New formula' }, icon('plus', 28)));
+  }
+  return { title: 'Formulas', el };
+}
+
+function renderFormula(ctx) {
+  const f = store.getFormula(ctx.params.id);
+  if (!f) return { title: 'Not found', back: '#/formulas', el: h('div', { class: 'card' }, h('h2', null, 'Formula not found'), h('p', { class: 'muted' }, 'It may have been deleted.'), h('a', { class: 'btn primary', href: '#/formulas' }, 'Back to formulas')) };
+  let batch = Number(ctx.query.g) > 0 ? Number(ctx.query.g) : f.batchG;
+  const trials = store.trials(f.id);
+  const el = h('div');
+
+  const input = numInput({ 'aria-label': 'Batch size in grams', value: String(batch) });
+  const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Common batch sizes' });
+  const table = h('div');
+  const setBatch = (v) => { batch = Math.min(1e7, Math.max(1, v)); input.value = String(Math.round(batch * 100) / 100); drawTable(); };
+  input.addEventListener('input', () => { const v = numOf(input); if (v > 0) { batch = v; drawTable(); } });
+
+  function drawTable() {
+    chips.replaceChildren(...PRESETS.map((p) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(p === batch), onclick: () => setBatch(p) }, `${p} g`)));
+    const scaled = scaleToGrams(f, batch);
+    const kids = [];
+    for (const p of PHASES) {
+      const group = scaled.filter((i) => i.phase === p.key);
+      if (!group.length) continue;
+      kids.push(h('h3', { style: 'margin:14px 0 6px' }, p.label),
+        h('div', { class: 'amounts' }, group.map((i) => h('div', { class: 'amt' },
+          h('div', null, h('div', { class: 'name' }, i.name), h('div', { class: 'conc' }, `${fmtPctNum(i.pct)} · ${roleLabel(i.role)}${i.note ? ` · ${i.note}` : ''}`)),
+          h('div', { class: 'num' }, fmtGrams(i.grams))))));
+    }
+    kids.push(h('p', { class: 'hint', style: 'margin-top:10px' }, `Total ${fmtPctNum(totalPct(f.ingredients))} = ${fmtGrams(totalPct(f.ingredients) / 100 * batch)}`));
+    table.replaceChildren(...kids);
+  }
+
+  const checks = checkFormula(f.ingredients);
+  const proc = f.process || {};
+  const procBits = [proc.heatC != null ? `Heat to ${proc.heatC} °C` : null, proc.mixRpm != null ? `${proc.mixRpm} rpm` : null, proc.mixMin != null ? `${proc.mixMin} min` : null, proc.cooling || null].filter(Boolean);
+
+  function historySheet() {
+    const hist = f.history || [];
+    const sheet = openSheet({
+      title: 'Version history',
+      body: h('div', null,
+        h('p', { class: 'muted' }, 'Each time you save a change, the old version is kept. Trials remember which version they used, so nothing is rewritten.'),
+        h('div', { class: 'card' }, h('b', null, `v${f.version} (current)`), h('div', { class: 'hint' }, fmtDate(f.updatedAt))),
+        ...hist.map((x) => h('div', { class: 'card' }, h('b', null, `v${x.version}`), h('div', { class: 'hint' }, `${fmtDate(x.savedAt)} · ${x.snapshot.ingredients.length} ingredients`),
+          h('button', { type: 'button', class: 'btn small', style: 'margin-top:8px', onclick: () => { store.restoreFormulaVersion(f.id, x.version); sheet.close(); toast(`Restored v${x.version} as a new version.`); ctx.rerender(); } }, 'Restore this version'))),
+        hist.length ? null : h('p', { class: 'muted' }, 'No earlier versions yet.')),
+    });
+  }
+
+  function compareSheet() {
+    const opts = trials.map((t) => ({ value: t.id, label: `Trial ${t.n} (${fmtDate(t.madeAt)})` }));
+    const a = selectEl(opts, trials[1].id);
+    const b = selectEl(opts, trials[0].id);
+    const sheet = openSheet({
+      title: 'Compare two trials',
+      body: h('div', null, field('Earlier trial', a), field('Later trial', b),
+        h('button', { type: 'button', class: 'btn primary wide', onclick: () => { if (a.value === b.value) { toast('Pick two different trials.', { kind: 'error' }); return; } sheet.close(); go(`#/formula/${f.id}/compare?a=${a.value}&b=${b.value}`); } }, 'Compare')),
+    });
+  }
+
+  function moreSheet() {
+    const sheet = openSheet({
+      title: f.name,
+      body: h('div', { class: 'row-stack' },
+        h('a', { class: 'btn', href: `#/formula/${f.id}/edit`, onclick: () => sheet.close() }, icon('edit', 18), 'Edit formula'),
+        h('button', { type: 'button', class: 'btn', onclick: () => { const c = store.duplicateFormula(f.id); sheet.close(); toast('Duplicated (trials are not copied).'); go(`#/formula/${c.id}`); } }, icon('copy', 18), 'Duplicate'),
+        h('button', { type: 'button', class: 'btn', onclick: async () => { sheet.close(); const r = await shareOrCopy({ title: f.name, text: formulaText(f, batch, store.settings().labName) }); if (r === 'copied') toast('Copied. Paste it into a message or note.'); else if (r === 'failed') toast('Could not share or copy.', { kind: 'error' }); } }, icon('share', 18), 'Share as text'),
+        h('button', { type: 'button', class: 'btn', onclick: () => { sheet.close(); historySheet(); } }, icon('history', 18), `Version history (v${f.version})`),
+        h('button', { type: 'button', class: 'btn danger', onclick: async () => {
+          sheet.close();
+          if (!(await confirmSheet({ title: 'Delete this formula?', message: `This also deletes its ${trials.length} trial${trials.length === 1 ? '' : 's'}. You can undo right after.`, confirmLabel: 'Delete', danger: true }))) return;
+          const gone = store.deleteFormula(f.id);
+          go('#/formulas');
+          toast(`Deleted "${gone.name}".`, { action: 'Undo', onAction: () => { store.undeleteFormula(gone); go(`#/formula/${gone.id}`); } });
+        } }, icon('trash', 18), 'Delete')),
+    });
+  }
+
+  const effects = singleChangeEffects(trials);
+  el.append(
+    f.description ? h('p', { class: 'muted' }, f.description) : null,
+    h('div', { class: 'row', style: 'margin-bottom:10px' }, f.productType ? h('span', { class: 'badge' }, f.productType) : null, h('span', { class: 'badge' }, `v${f.version}`)),
+    checks.map((c) => h('div', { class: `note ${c.level === 'bad' ? 'bad' : c.level === 'info' ? 'info' : ''}` }, c.text)),
+    h('div', { class: 'card' },
+      h('div', { class: 'field-label' }, 'Batch size (grams)'),
+      h('div', { class: 'stepper' },
+        h('button', { type: 'button', class: 'btn', 'aria-label': 'Less', onclick: () => setBatch(batch - stepFor(batch)) }, icon('minus')),
+        input,
+        h('button', { type: 'button', class: 'btn', 'aria-label': 'More', onclick: () => setBatch(batch + stepFor(batch)) }, icon('plus'))),
+      chips, table),
+    procBits.length || proc.steps ? h('div', { class: 'card' }, h('h3', null, 'Process'), procBits.length ? h('p', null, procBits.join(' · ')) : null, proc.steps ? h('ol', { style: 'margin:0;padding-left:20px' }, proc.steps.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).map((s) => h('li', { style: 'margin:4px 0' }, s))) : null) : null,
+    h('div', { class: 'card' },
+      h('h2', null, 'Trials'),
+      trials.length ? h('div', { class: 'list' }, trials.map((t) => h('a', { class: 'item', href: `#/formula/${f.id}/trial/${t.id}` },
+        h('div', { class: 'title' }, `Trial ${t.n}`),
+        h('div', { class: 'sub' }, `${fmtDate(t.madeAt)} · formula v${t.formulaVersion}${t.batchG ? ` · ${t.batchG} g` : ''}`),
+        h('div', { style: 'margin-top:6px' }, scorePills(t.scores)),
+        t.issues.length ? h('div', { style: 'margin-top:6px' }, issueBadges(t.issues)) : null)))
+        : h('p', { class: 'muted' }, 'No trials yet. Make a small batch, then tap "Log a trial" to record how it turned out.'),
+      trials.length > 1 ? h('button', { type: 'button', class: 'btn wide', style: 'margin-top:10px', onclick: compareSheet }, 'Compare two trials') : null),
+    trials.length > 1 ? h('div', { class: 'card' },
+      h('h3', null, 'What your own trials show'),
+      effects.length ? h('div', null, h('p', { class: 'muted small' }, 'Only trials where exactly one thing changed are listed, because only those tell you what that change did.'),
+        effects.map((e) => h('div', { style: 'margin:8px 0' }, h('b', null, `Trial ${e.from} → ${e.to}: `), e.change.text, h('div', { class: 'hint' }, e.deltas.map((d) => `${d.label} ${deltaText(d.delta)}`).join(' · ')))))
+        : h('p', { class: 'muted' }, 'No clean single-change experiments yet. Change one thing between trials and this panel will show what it did.')) : null,
+    h('div', { class: 'actionbar' },
+      h('a', { class: 'btn', href: `#/formula/${f.id}/fix` }, icon('warn', 18), 'Fix a problem'),
+      h('a', { class: 'btn primary', href: `#/formula/${f.id}/trial` }, icon('plus', 18), 'Log a trial')));
+  drawTable();
+  return { title: f.name, back: '#/formulas', actions: [h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'More actions', onclick: moreSheet }, icon('more'))], el };
+}
+
+return { renderFormulas, renderFormula };
+})();
+const __m_js_pages_formula_edit_js = (() => {
+const { h, icon, toast, numInput, field, selectEl } = __m_js_ui_js;
+const { store, go } = __m_js_state_js;
+const { ValidationError } = __m_js_store_js;
+const { ROLES, PHASES, COMMON_INGREDIENTS, checkFormula, totalPct, fillWater } = __m_js_formulas_js;
+
+
+
+
+const TYPES = ['Cream', 'Lotion', 'Sunscreen', 'Serum', 'Gel', 'Balm', 'Other'];
+const toNum = (v) => { const s = String(v ?? '').trim().replace(',', '.'); if (s === '') return ''; const n = Number(s); return Number.isFinite(n) ? n : NaN; };
+
+function renderFormulaEdit(ctx) {
+  const existing = ctx.params.id ? store.getFormula(ctx.params.id) : null;
+  if (ctx.params.id && !existing) return { title: 'Not found', back: '#/formulas', el: h('div', { class: 'card' }, h('h2', null, 'Formula not found'), h('a', { class: 'btn primary', href: '#/formulas' }, 'Back to formulas')) };
+
+  const rows = existing
+    ? existing.ingredients.map((i) => ({ name: i.name, pct: String(i.pct), phase: i.phase, role: i.role, note: i.note }))
+    : [{ name: '', pct: '', phase: 'A', role: 'oil', note: '' }, { name: 'Water (aqua)', pct: '', phase: 'B', role: 'water', note: 'balance' }];
+  const p = existing ? existing.process : {};
+
+  const name = h('input', { type: 'text', maxlength: 120, value: existing ? existing.name : '', placeholder: 'e.g. Day cream v1', autocomplete: 'off' });
+  const type = selectEl(TYPES, existing && existing.productType ? existing.productType : 'Cream');
+  const desc = h('textarea', { maxlength: 1000, placeholder: 'What is this product meant to do?', style: 'min-height:80px' }, existing ? existing.description : '');
+  const batch = numInput({ value: existing ? String(existing.batchG) : '100' });
+  const heat = numInput({ value: p.heatC ?? '', placeholder: 'e.g. 75' });
+  const rpm = numInput({ value: p.mixRpm ?? '', placeholder: 'e.g. 3000' });
+  const mins = numInput({ value: p.mixMin ?? '', placeholder: 'e.g. 3' });
+  const cooling = h('input', { type: 'text', maxlength: 120, value: p.cooling || '', placeholder: 'e.g. stir while cooling to 40 °C' });
+  const steps = h('textarea', { maxlength: 4000, placeholder: 'One step per line', style: 'min-height:130px' }, p.steps || '');
+
+  const datalist = h('datalist', { id: 'lkr-ingredients' }, COMMON_INGREDIENTS.map((i) => h('option', { value: i.name })));
+  const rowsBox = h('div');
+  const summary = h('div');
+
+  const parsed = () => rows.map((r) => ({ name: r.name.trim(), pct: Number(toNum(r.pct)) || 0, phase: r.phase, role: r.role }));
+  function drawSummary() {
+    const list = parsed().filter((r) => r.name || r.pct);
+    const total = totalPct(list);
+    const ok = Math.abs(total - 100) <= 0.01;
+    summary.replaceChildren(
+      h('div', { class: `note ${ok ? 'info' : total > 100 ? 'bad' : ''}`, role: 'status' }, h('b', null, `Total ${Math.round(total * 1000) / 1000}%`), ok ? ' — adds up to 100%.' : ''),
+      ...checkFormula(list).filter((c) => !/Adds up to/.test(c.text)).map((c) => h('div', { class: `note ${c.level === 'bad' ? 'bad' : c.level === 'info' ? 'info' : ''}` }, c.text)));
+  }
+
+  function drawRows() {
+    rowsBox.replaceChildren(...rows.map((r, n) => {
+      const nameIn = h('input', { type: 'text', list: 'lkr-ingredients', maxlength: 120, value: r.name, placeholder: 'Ingredient name', autocomplete: 'off', 'aria-label': `Ingredient ${n + 1} name` });
+      const pct = numInput({ value: r.pct, placeholder: '%', 'aria-label': `Ingredient ${n + 1} percentage` });
+      const phase = selectEl(PHASES.map((x) => ({ value: x.key, label: x.label })), r.phase, { 'aria-label': `Ingredient ${n + 1} phase` });
+      const role = selectEl(ROLES.map((x) => ({ value: x.key, label: x.label })), r.role, { 'aria-label': `Ingredient ${n + 1} role` });
+      const note = h('input', { type: 'text', maxlength: 200, value: r.note, placeholder: 'Note (supplier, grade, how to add)', 'aria-label': `Ingredient ${n + 1} note` });
+      nameIn.addEventListener('input', () => { r.name = nameIn.value; drawSummary(); });
+      nameIn.addEventListener('change', () => {
+        const hit = COMMON_INGREDIENTS.find((c) => c.name.toLowerCase() === nameIn.value.trim().toLowerCase());
+        if (hit && r.role === 'other') { r.role = hit.role; r.phase = hit.phase; drawRows(); drawSummary(); }
+      });
+      pct.addEventListener('input', () => { r.pct = pct.value; drawSummary(); });
+      phase.addEventListener('change', () => { r.phase = phase.value; drawSummary(); });
+      role.addEventListener('change', () => { r.role = role.value; drawSummary(); });
+      note.addEventListener('input', () => { r.note = note.value; });
+      return h('div', { class: 'card' },
+        h('div', { class: 'with-unit' }, nameIn, pct),
+        h('div', { class: 'two', style: 'margin-top:8px' }, phase, role),
+        h('div', { style: 'margin-top:8px' }, note),
+        h('button', { type: 'button', class: 'btn small danger', style: 'margin-top:8px', onclick: () => { rows.splice(n, 1); drawRows(); drawSummary(); } }, icon('trash', 16), 'Remove'));
+    }));
+  }
+
+  function fill() {
+    const res = fillWater(rows.map((r) => ({ ...r, pct: Number(toNum(r.pct)) || 0 })));
+    if (!res.changed) { toast(res.reason, { kind: 'error' }); return; }
+    res.ingredients.forEach((i, n) => { rows[n].pct = String(i.pct); });
+    drawRows();
+    drawSummary();
+    toast(`Water set to ${res.water}%.`);
+  }
+
+  function collect() {
+    const ingredients = rows.filter((r) => r.name.trim() || String(r.pct).trim()).map((r) => ({ name: r.name, pct: toNum(r.pct), phase: r.phase, role: r.role, note: r.note }));
+    return {
+      name: name.value, productType: type.value, description: desc.value, batchG: toNum(batch.value) === '' ? null : toNum(batch.value), ingredients,
+      process: { heatC: toNum(heat.value) === '' ? null : toNum(heat.value), mixRpm: toNum(rpm.value) === '' ? null : toNum(rpm.value), mixMin: toNum(mins.value) === '' ? null : toNum(mins.value), cooling: cooling.value, steps: steps.value },
+    };
+  }
+
+  function save() {
+    try {
+      const rec = store.saveFormula(collect(), existing ? existing.id : null);
+      toast(existing ? `Saved as version ${rec.version}.` : 'Formula saved.');
+      go(`#/formula/${rec.id}`);
+    } catch (e) { if (!(e instanceof ValidationError)) throw e; toast(e.message, { kind: 'error', ms: 6000 }); }
+  }
+
+  drawRows();
+  drawSummary();
+  const el = h('div', null,
+    datalist,
+    h('div', { class: 'card' }, field('Name', name), field('Product type', type), field('What is it for?', desc), field('Usual batch size (grams)', batch)),
+    h('h2', null, 'Ingredients (% by weight)'),
+    h('p', { class: 'muted small' }, 'Phase says when it is added: A and B are heated, C is added when cooled. Role helps the checks and the troubleshooting guide find the right ingredient.'),
+    rowsBox,
+    h('div', { class: 'row-stack', style: 'margin-top:0' },
+      h('button', { type: 'button', class: 'btn', onclick: () => { rows.push({ name: '', pct: '', phase: 'A', role: 'other', note: '' }); drawRows(); const last = rowsBox.querySelector('.card:last-child input'); if (last) last.focus(); } }, icon('plus', 18), 'Add ingredient'),
+      h('button', { type: 'button', class: 'btn', onclick: fill }, 'Fill water to 100%')),
+    summary,
+    h('div', { class: 'card', style: 'margin-top:12px' },
+      h('h2', null, 'Process'),
+      h('p', { class: 'muted small' }, 'Technique changes results as much as ingredients, so it is saved with each version and each trial.'),
+      h('div', { class: 'two' }, field('Heat to (°C)', heat), field('Mixing speed (rpm)', rpm)),
+      h('div', { class: 'two' }, field('Mixing time (min)', mins), field('Cooling', cooling)),
+      field('Method', steps)),
+    h('div', { class: 'actionbar' }, h('a', { class: 'btn', href: existing ? `#/formula/${existing.id}` : '#/formulas' }, 'Cancel'), h('button', { type: 'button', class: 'btn primary', onclick: save }, icon('check', 18), 'Save')));
+  return { title: existing ? 'Edit formula' : 'New formula', back: existing ? `#/formula/${existing.id}` : '#/formulas', el };
+}
+
+return { renderFormulaEdit };
+})();
+const __m_js_pages_trials_js = (() => {
+const { h, icon, toast, numOf, numInput, field, confirmSheet, fmtDate } = __m_js_ui_js;
+const { store, go } = __m_js_state_js;
+const { ValidationError } = __m_js_store_js;
+const { METRICS, PROBLEMS, findProblem, diffFormulas, scoreDeltas, scoreTotal, fmtPctNum, roleLabel, phaseLabel } = __m_js_formulas_js;
+const { scorePills, issueBadges, changeList, deltaText } = __m_js_formula_ui_js;
+
+
+
+
+
+const notFound = (back = '#/formulas') => ({ title: 'Not found', back, el: h('div', { class: 'card' }, h('h2', null, 'Not found'), h('p', { class: 'muted' }, 'It may have been deleted.'), h('a', { class: 'btn primary', href: back }, 'Go back')) });
+const clone = (v) => JSON.parse(JSON.stringify(v));
+
+// The change summary that stops people changing five things at once and learning nothing.
+function changeNote(prev, now) {
+  if (!prev) return h('div', { class: 'note info' }, 'This is your first trial, so it is the baseline. Later trials are compared with it.');
+  const changes = diffFormulas(prev, now);
+  if (!changes.length) return h('div', { class: 'note info' }, `Identical to Trial ${prev.n}. A repeat is useful to check you get the same result twice.`);
+  if (changes.length === 1) return h('div', { class: 'note info' }, h('b', null, `One change since Trial ${prev.n}: `), changes[0].text, '. Good: if the result differs, you know why.');
+  return h('div', { class: 'note' }, h('b', null, `${changes.length} changes since Trial ${prev.n}:`), changeList(changes), 'If the result is different you will not know which change caused it. Changing one thing at a time teaches you more.');
+}
+
+function trialForm(ctx, f, existing) {
+  const base = existing || { ingredients: clone(f.ingredients), process: clone(f.process), formulaVersion: f.version };
+  const all = store.trials(f.id);
+  const prev = existing ? all.find((t) => t.n < existing.n) : all[0];
+  const scores = { ...(existing ? existing.scores : {}) };
+  const issues = new Set(existing ? existing.issues : []);
+  const batchG = numInput({ value: existing && existing.batchG ? String(existing.batchG) : String(f.batchG), 'aria-label': 'Batch size in grams' });
+  const ph = numInput({ value: existing && existing.ph != null ? String(existing.ph) : '', placeholder: 'optional', 'aria-label': 'pH' });
+  const notes = h('textarea', { maxlength: 1500, placeholder: 'What did you see? Colour, how it rubbed in, smell, anything odd. Come back and add how it looks after a day and a week.' }, existing ? existing.notes : '');
+  const scoreBox = h('div');
+  const issueBox = h('div', { class: 'chips' });
+
+  function drawScores() {
+    scoreBox.replaceChildren(...METRICS.map((m) => h('div', { style: 'margin-bottom:12px' },
+      h('div', { class: 'field-label' }, m.label),
+      h('div', { class: 'hint' }, `1 = ${m.low}, 5 = ${m.high}`),
+      h('div', { class: 'chips', style: 'margin:6px 0 0' }, [1, 2, 3, 4, 5].map((v) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(scores[m.key] === v), 'aria-label': `${m.label} ${v} out of 5`, onclick: () => { scores[m.key] = scores[m.key] === v ? null : v; drawScores(); } }, String(v)))))));
+  }
+  function drawIssues() {
+    issueBox.replaceChildren(...PROBLEMS.map((p) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(issues.has(p.key)), onclick: () => { if (issues.has(p.key)) issues.delete(p.key); else issues.add(p.key); drawIssues(); } }, p.label)));
+  }
+
+  function save() {
+    try {
+      const patch = { batchG: numOf(batchG), ph: numOf(ph), scores: { ...scores }, issues: [...issues], notes: notes.value };
+      let t;
+      if (existing) t = store.updateTrial(f.id, existing.id, patch);
+      else t = store.addTrial(f.id, { ...patch, ingredients: base.ingredients, process: base.process, formulaVersion: base.formulaVersion, madeAt: new Date().toISOString() });
+      toast(existing ? 'Trial updated.' : `Trial ${t.n} logged.`);
+      go(`#/formula/${f.id}/trial/${t.id}`);
+    } catch (e) { if (!(e instanceof ValidationError)) throw e; toast(e.message, { kind: 'error' }); }
+  }
+
+  drawScores();
+  drawIssues();
+  const back = existing ? `#/formula/${f.id}/trial/${existing.id}` : `#/formula/${f.id}`;
+  return {
+    title: existing ? `Edit trial ${existing.n}` : 'Log a trial',
+    back,
+    el: h('div', null,
+      h('div', { class: 'card' },
+        h('p', { class: 'muted', style: 'margin:0' }, existing ? `Trial ${existing.n}, made ${fmtDate(existing.madeAt)} with formula v${base.formulaVersion}. The ingredients stay as they were; you can fix the scores and notes.` : `Recorded exactly as the formula is now (v${f.version}). If you changed anything while making it, edit the formula first.`)),
+      existing ? null : changeNote(prev, base),
+      h('div', { class: 'card' }, h('h2', null, 'How did it turn out?'), h('p', { class: 'muted small' }, 'Score what you can now. Leave the rest and come back later.'), scoreBox),
+      h('div', { class: 'card' }, h('h2', null, 'Any problems?'), issueBox),
+      h('div', { class: 'card' }, h('div', { class: 'two' }, field('Batch size (g)', batchG), field('pH', ph)), field('Notes', notes)),
+      h('div', { class: 'actionbar' }, h('a', { class: 'btn', href: back }, 'Cancel'), h('button', { type: 'button', class: 'btn primary', onclick: save }, icon('check', 18), 'Save'))),
+  };
+}
+
+function renderTrialNew(ctx) {
+  const f = store.getFormula(ctx.params.id);
+  return f ? trialForm(ctx, f, null) : notFound();
+}
+
+function renderTrialEdit(ctx) {
+  const f = store.getFormula(ctx.params.id);
+  const t = f && store.getTrial(f.id, ctx.params.tid);
+  return t ? trialForm(ctx, f, t) : notFound();
+}
+
+function renderTrial(ctx) {
+  const f = store.getFormula(ctx.params.id);
+  const t = f && store.getTrial(f.id, ctx.params.tid);
+  if (!t) return notFound();
+  const all = store.trials(f.id);
+  const prev = all.find((x) => x.n < t.n);
+
+  const rows = ['A', 'B', 'C', 'D'].flatMap((ph) => {
+    const g = t.ingredients.filter((i) => i.phase === ph);
+    return g.length ? [h('tr', null, h('th', { colspan: 2 }, phaseLabel(ph))), ...g.map((i) => h('tr', null, h('td', null, i.name, h('div', { class: 'hint' }, roleLabel(i.role))), h('td', { class: 'num' }, fmtPctNum(i.pct))))] : [];
+  });
+  const proc = t.process || {};
+  const procBits = [proc.heatC != null ? `Heat to ${proc.heatC} °C` : null, proc.mixRpm != null ? `${proc.mixRpm} rpm` : null, proc.mixMin != null ? `${proc.mixMin} min` : null, proc.cooling || null].filter(Boolean);
+  const changes = prev ? diffFormulas(prev, t) : [];
+
+  async function remove() {
+    if (!(await confirmSheet({ title: 'Delete this trial?', message: 'You can undo right after.', confirmLabel: 'Delete', danger: true }))) return;
+    const gone = store.deleteTrial(f.id, t.id);
+    go(`#/formula/${f.id}`);
+    toast(`Deleted trial ${gone.n}.`, { action: 'Undo', onAction: () => { store.undeleteTrial(f.id, gone); go(`#/formula/${f.id}/trial/${gone.id}`); } });
+  }
+
+  return {
+    title: `Trial ${t.n}`,
+    back: `#/formula/${f.id}`,
+    el: h('div', null,
+      h('div', { class: 'row', style: 'margin-bottom:10px' }, h('span', { class: 'badge' }, fmtDate(t.madeAt)), h('span', { class: 'badge' }, `formula v${t.formulaVersion}`), t.batchG ? h('span', { class: 'badge' }, `${t.batchG} g`) : null, t.ph != null ? h('span', { class: 'badge' }, `pH ${t.ph}`) : null),
+      h('div', { class: 'card' }, h('h2', null, 'Result'), scorePills(t.scores), t.issues.length ? h('div', { style: 'margin-top:8px' }, issueBadges(t.issues)) : null, t.notes ? h('p', { style: 'margin-top:10px;white-space:pre-wrap' }, t.notes) : h('p', { class: 'muted', style: 'margin-top:10px' }, 'No notes yet.'),
+        h('div', { class: 'row-stack' },
+          h('a', { class: 'btn', href: `#/formula/${f.id}/trial/${t.id}/edit` }, icon('edit', 18), 'Add scores or notes'),
+          t.issues.length ? h('a', { class: 'btn primary', href: `#/formula/${f.id}/fix?issue=${t.issues[0]}` }, icon('warn', 18), 'What could fix this?') : null,
+          prev ? h('a', { class: 'btn', href: `#/formula/${f.id}/compare?a=${prev.id}&b=${t.id}` }, `Compare with trial ${prev.n}`) : null)),
+      prev ? h('div', { class: 'card' }, h('h3', null, `Changed since trial ${prev.n}`), changes.length ? changeList(changes) : h('p', { class: 'muted' }, 'Nothing: a repeat of the same formula and process.')) : null,
+      h('div', { class: 'card' }, h('h3', null, 'Formula as made'), h('table', { class: 'plain' }, h('tbody', null, rows)), procBits.length ? h('p', { style: 'margin-top:10px' }, procBits.join(' · ')) : null, proc.steps ? h('p', { class: 'small muted', style: 'white-space:pre-wrap' }, proc.steps) : null),
+      h('button', { type: 'button', class: 'btn danger wide', onclick: remove }, icon('trash', 18), 'Delete this trial')),
+  };
+}
+
+function renderCompare(ctx) {
+  const f = store.getFormula(ctx.params.id);
+  const a = f && store.getTrial(f.id, ctx.query.a);
+  const b = f && store.getTrial(f.id, ctx.query.b);
+  if (!a || !b) return notFound(f ? `#/formula/${f.id}` : '#/formulas');
+  const changes = diffFormulas(a, b);
+  const deltas = scoreDeltas(a, b);
+  const ta = scoreTotal(a.scores);
+  const tb = scoreTotal(b.scores);
+  const cell = (s, k) => (s && Number.isFinite(s[k]) ? `${s[k]}/5` : '—');
+  return {
+    title: `Trial ${a.n} vs ${b.n}`,
+    back: `#/formula/${f.id}`,
+    el: h('div', null,
+      h('div', { class: 'card' }, h('h3', null, 'What changed'), changes.length ? changeList(changes) : h('p', { class: 'muted' }, 'Nothing: the same formula and process.'),
+        changes.length > 1 ? h('p', { class: 'hint' }, `${changes.length} changes at once, so any difference in the result could come from any of them.`) : null),
+      h('div', { class: 'card' }, h('h3', null, 'What happened'),
+        h('div', { class: 'scroll-x' }, h('table', { class: 'plain' },
+          h('thead', null, h('tr', null, h('th', null, ''), h('th', { class: 'num' }, `Trial ${a.n}`), h('th', { class: 'num' }, `Trial ${b.n}`), h('th', { class: 'num' }, 'Change'))),
+          h('tbody', null, METRICS.map((m) => { const d = deltas.find((x) => x.key === m.key); return h('tr', null, h('td', null, m.label), h('td', { class: 'num' }, cell(a.scores, m.key)), h('td', { class: 'num' }, cell(b.scores, m.key)), h('td', { class: 'num' }, d ? h('span', { class: `badge ${d.delta > 0 ? 'ok' : d.delta < 0 ? 'bad' : ''}` }, d.delta === 0 ? 'same' : deltaText(d.delta)) : '—')); }),
+            h('tr', null, h('th', null, 'Total'), h('th', { class: 'num' }, ta ?? '—'), h('th', { class: 'num' }, tb ?? '—'), h('th', { class: 'num' }, ta !== null && tb !== null ? deltaText(tb - ta) : '—'))))),
+        deltas.length ? null : h('p', { class: 'hint' }, 'Score both trials to see how the result changed.')),
+      h('div', { class: 'card' }, h('h3', null, 'Problems noted'),
+        h('p', { class: 'small' }, h('b', null, `Trial ${a.n}: `), a.issues.length ? a.issues.map((k) => (findProblem(k) || {}).label).filter(Boolean).join(', ') : 'none'),
+        h('p', { class: 'small' }, h('b', null, `Trial ${b.n}: `), b.issues.length ? b.issues.map((k) => (findProblem(k) || {}).label).filter(Boolean).join(', ') : 'none')),
+      (a.notes || b.notes) ? h('div', { class: 'card' }, h('h3', null, 'Notes'), a.notes ? h('p', { class: 'small', style: 'white-space:pre-wrap' }, h('b', null, `Trial ${a.n}: `), a.notes) : null, b.notes ? h('p', { class: 'small', style: 'white-space:pre-wrap' }, h('b', null, `Trial ${b.n}: `), b.notes) : null) : null),
+  };
+}
+
+return { renderTrialNew, renderTrialEdit, renderTrial, renderCompare };
+})();
+const __m_js_pages_troubleshoot_js = (() => {
+const { h, icon } = __m_js_ui_js;
+const { store } = __m_js_state_js;
+const { PROBLEMS, findProblem, ingredientsForCause, fmtPctNum, roleLabel } = __m_js_formulas_js;
+
+
+
+function renderTroubleshoot(ctx) {
+  const f = store.getFormula(ctx.params.id);
+  if (!f) return { title: 'Not found', back: '#/formulas', el: h('div', { class: 'card' }, h('h2', null, 'Formula not found'), h('a', { class: 'btn primary', href: '#/formulas' }, 'Back to formulas')) };
+  const latest = store.trials(f.id)[0];
+  let key = (findProblem(ctx.query.issue) || findProblem(latest && latest.issues[0]) || {}).key || null;
+  const chips = h('div', { class: 'chips', role: 'group', 'aria-label': 'Problem' });
+  const out = h('div');
+
+  function draw() {
+    chips.replaceChildren(...PROBLEMS.map((p) => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(p.key === key), onclick: () => { key = p.key; draw(); } }, p.label)));
+    const p = findProblem(key);
+    if (!p) { out.replaceChildren(h('p', { class: 'muted' }, 'Pick the problem you are seeing.')); return; }
+    const cards = p.causes.map((c) => ({ c, mine: ingredientsForCause(c, f.ingredients) }))
+      .map((x) => ({ ...x, rank: x.c.roles.length ? (x.mine.length ? 0 : 2) : 1 }))
+      .sort((a, b) => a.rank - b.rank);
+    out.replaceChildren(
+      h('div', { class: 'note info' }, h('b', null, 'First, a question: '), p.ask),
+      h('p', { class: 'muted small' }, 'Likeliest first for your formula. These are the usual things to try, not a prediction: your ingredients and equipment decide what really works.'),
+      ...cards.map(({ c, mine }) => h('div', { class: 'card' },
+        h('div', { class: 'row', style: 'justify-content:space-between' }, h('h3', { style: 'margin:0' }, c.title), h('span', { class: `badge ${c.lever === 'process' ? 'warn' : ''}` }, c.lever === 'process' ? 'Technique' : 'Ingredient')),
+        mine.length ? h('div', { class: 'hint', style: 'margin:6px 0' }, 'In your formula: ', mine.map((i) => `${i.name} ${fmtPctNum(i.pct)} (${roleLabel(i.role)})`).join(', ')) : (c.roles.length ? h('div', { class: 'hint', style: 'margin:6px 0' }, 'Nothing in your formula has this role, so it may not apply.') : null),
+        h('p', { style: 'margin:6px 0' }, h('b', null, 'Why: '), c.why),
+        h('p', { style: 'margin:0' }, h('b', null, 'Try: '), c.tryFirst))),
+      h('div', { class: 'card' },
+        h('h3', null, 'How to test it properly'),
+        h('ol', { style: 'margin:0;padding-left:20px' },
+          h('li', { style: 'margin:4px 0' }, 'Pick one thing from above and change only that.'),
+          h('li', { style: 'margin:4px 0' }, 'Make a small batch the same way as before (same heat, speed, time and cooling).'),
+          h('li', { style: 'margin:4px 0' }, 'Log it as a trial and score it. Check again after a day and a week.')),
+        h('div', { class: 'row-stack' },
+          h('a', { class: 'btn', href: `#/formula/${f.id}/edit` }, icon('edit', 18), 'Edit the formula'),
+          h('a', { class: 'btn primary', href: `#/formula/${f.id}/trial` }, icon('plus', 18), 'Log a trial'))),
+      h('p', { class: 'hint' }, 'Anything you sell needs proper stability, preservative and safety testing, and a check of the rules where you sell. This guide does not replace that.'));
+  }
+  draw();
+  return { title: 'Fix a problem', back: `#/formula/${f.id}`, el: h('div', null, h('p', { class: 'muted' }, `What is wrong with ${f.name}?`), chips, out) };
+}
+
+return { renderTroubleshoot };
+})();
 const __m_js_main_js = (() => {
 const { h, clear, icon, toast } = __m_js_ui_js;
 const { store } = __m_js_state_js;
@@ -3053,6 +4069,14 @@ const { renderLibrary } = __m_js_pages_library_js;
 const { renderQuick } = __m_js_pages_quick_js;
 const { renderSettings, applyTheme } = __m_js_pages_settings_js;
 const { renderHelp } = __m_js_pages_help_js;
+const { renderFormulas, renderFormula } = __m_js_pages_formulas_js;
+const { renderFormulaEdit } = __m_js_pages_formula_edit_js;
+const { renderTrialNew, renderTrialEdit, renderTrial, renderCompare } = __m_js_pages_trials_js;
+const { renderTroubleshoot } = __m_js_pages_troubleshoot_js;
+
+
+
+
 
 
 
@@ -3074,15 +4098,24 @@ const ROUTES = [
   ['/batches', renderBatches, 'batches'],
   ['/batch/:id', renderBatch, 'batches'],
   ['/quick', renderQuick, 'quick'],
-  ['/library', renderLibrary, 'library'],
+  ['/formulas', renderFormulas, 'formulas'],
+  ['/formula/new', renderFormulaEdit, 'formulas'],
+  ['/formula/:id/edit', renderFormulaEdit, 'formulas'],
+  ['/formula/:id/trial', renderTrialNew, 'formulas'],
+  ['/formula/:id/trial/:tid/edit', renderTrialEdit, 'formulas'],
+  ['/formula/:id/trial/:tid', renderTrial, 'formulas'],
+  ['/formula/:id/compare', renderCompare, 'formulas'],
+  ['/formula/:id/fix', renderTroubleshoot, 'formulas'],
+  ['/formula/:id', renderFormula, 'formulas'],
+  ['/library', renderLibrary, 'more'],
   ['/settings', renderSettings, 'more'],
   ['/help', renderHelp, 'more'],
 ];
 const TABS = [
-  ['recipes', 'Recipes', '#/', 'recipes'],
+  ['recipes', 'Solutions', '#/', 'recipes'],
+  ['formulas', 'Formulas', '#/formulas', 'formulas'],
   ['quick', 'Quick', '#/quick', 'quick'],
   ['batches', 'Batches', '#/batches', 'batches'],
-  ['library', 'Reagents', '#/library', 'library'],
   ['more', 'More', '#/settings', 'more'],
 ];
 
